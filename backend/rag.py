@@ -1,3 +1,4 @@
+from dotenv import load_dotenv
 import os
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -10,14 +11,16 @@ from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
+load_dotenv()
+
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 # --- CONFIGURATION ---
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 PDF_PATH = os.path.join(BASE_DIR, "data", "math.pdf")
 DB_PATH = os.path.join(BASE_DIR, "chroma_db")
 
-# PASTE YOUR KEY BELOW (Keep the quotes!)
-GOOGLE_API_KEY = "AIzaSyBwzT7h-Kve13ZBBswBdJOU_ktPgGtfCOA"
+
 
 def create_vector_db():
     if os.path.exists(DB_PATH):
