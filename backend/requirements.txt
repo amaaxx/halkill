@@ -1,0 +1,14 @@
+fastapi[standard]
+python-multipart
+
+langchain==0.1.*
+langchain-core==0.1.*
+langchain-community==0.0.*
+langchain-text-splitters
+langchain-huggingface
+langchain-chroma
+langchain-google-genai
+
+chromadb
+pypdf
+sentence-transformers
