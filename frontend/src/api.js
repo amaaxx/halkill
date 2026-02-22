@@ -9,8 +9,9 @@ export async function askQuestion(question) {
 
   const data = await response.json();
 
-  if (!data.success) {
-    throw new Error(data.error);
+  // Check HTTP status instead
+  if (!response.ok) {
+    throw new Error(data.detail || "Something went wrong");
   }
 
   return data.answer;
