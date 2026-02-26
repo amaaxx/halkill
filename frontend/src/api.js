@@ -11,7 +11,9 @@ export async function askQuestion(question) {
 
   // Check HTTP status instead
   if (!response.ok) {
-    throw new Error(data.detail || "Something went wrong");
+    throw new Error(
+      data?.error?.message || data?.detail || "Something went wrong"
+    );
   }
 
   return data.answer;

@@ -11,3 +11,7 @@ build/
 # OS 
 .DS_Store 
 Thumbs.db 
+
+# Logs
+backend/logs/
+*.log

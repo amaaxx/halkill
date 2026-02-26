@@ -11,6 +11,9 @@ from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
+from logger import get_logger
+logger = get_logger(__name__)
+
 load_dotenv()
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
@@ -27,25 +30,25 @@ DB_PATH = os.path.join(BASE_DIR, "chroma_db")
 
 def create_vector_db():
     if os.path.exists(DB_PATH):
-        print(f"⚠️  Database already exists at {DB_PATH}.")
+        logger.warning(f"Database already exists at {DB_PATH}.")
         return
     
     if not os.path.exists(PDF_PATH):
-        print(f"❌ Error: File not found at {PDF_PATH}")
+        logger.error(f"File not found at {PDF_PATH}")
         return
 
-    print("📚 Loading PDF...")
+    logger.info("Loading PDF...")
     loader = PyPDFLoader(PDF_PATH)
     docs = loader.load()
     
-    print("✂️  Splitting text...")
+    logger.info("Splitting text...")
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     chunks = text_splitter.split_documents(docs)
 
-    print("mb  Creating Database...")
+    logger.info("Creating Database...")
     embedding_function = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
     vector_store = Chroma.from_documents(chunks, embedding_function, persist_directory=DB_PATH)
-    print(f"✅ Database saved to '{DB_PATH}'.")
+    logger.info(f"Database saved to '{DB_PATH}'.")
 
 def format_docs(docs):
     return "\n\n".join(doc.page_content for doc in docs)
