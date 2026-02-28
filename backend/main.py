@@ -1,11 +1,14 @@
-from fastapi import FastAPI, HTTPException, Request
+import os
+import shutil
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File #  Add UploadFile and File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from rag import ask_question_stream
+from rag import ask_question_stream, add_pdf_to_vector_store # <-- Import the new function
 from logger import get_logger
 import uuid
 from fastapi.responses import JSONResponse, StreamingResponse
+
 
 logger = get_logger(__name__)
 
@@ -81,3 +84,27 @@ async def ask(q: Question, request: Request):
         ask_question_stream(q.query), 
         media_type="text/event-stream"
     )
+
+@app.post("/upload")
+async def upload_document(file: UploadFile = File(...)):
+    os.makedirs("data", exist_ok=True)
+    file_path = os.path.join("data", file.filename)
+    
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+        
+    logger.info(f"Successfully uploaded: {file.filename}")
+    
+    # THE UPGRADE: Process the PDF and add it to the Vector Database
+    try:
+        # This calls LangChain to chop up the PDF and embed it
+        add_pdf_to_vector_store(file_path) 
+    except Exception as e:
+        logger.error(f"Failed to process PDF: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to extract text from PDF: {str(e)}")
+    
+    return {
+        "success": True, 
+        "filename": file.filename, 
+        "message": "Document uploaded and processed successfully!"
+    }

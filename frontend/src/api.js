@@ -25,3 +25,24 @@ export async function askQuestionStream(question, onChunk) {
     onChunk(chunk); 
   }
 }
+
+// Function to handle file uploads using FormData
+export async function uploadDocument(file) {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const response = await fetch("http://127.0.0.1:8000/upload", {
+    method: "POST",
+    // Note: We DO NOT set "Content-Type" here. 
+    // The browser automatically sets it to "multipart/form-data" when it sees FormData.
+    body: formData,
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data?.detail || "Failed to upload document");
+  }
+
+  return data;
+}

@@ -73,7 +73,7 @@ vector_store = Chroma(
     embedding_function=embedding_function
 )
 
-retriever = vector_store.as_retriever(search_kwargs={"k": 3})
+retriever = vector_store.as_retriever(search_kwargs={"k": 10})
 
 # Prompt
 system_prompt = (
@@ -113,3 +113,29 @@ async def ask_question_stream(query: str):
     async for chunk in llm.astream(messages):
         if chunk.content:  # Safely yield only the text
             yield chunk.content
+
+# =================================================================
+# 3. DYNAMIC INGESTION (Adding new files on the fly)
+# =================================================================
+def add_pdf_to_vector_store(file_path: str):
+    logger.info(f"Processing new PDF: {file_path}")
+    
+    if not os.path.exists(file_path):
+        logger.error(f"File not found at {file_path}")
+        raise FileNotFoundError(f"File not found at {file_path}")
+
+    # 1. Load the new PDF
+    logger.info("Loading PDF...")
+    loader = PyPDFLoader(file_path)
+    docs = loader.load()
+
+    # 2. Split it into chunks (the math we talked about for Day 5!)
+    logger.info("Splitting text...")
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    chunks = text_splitter.split_documents(docs)
+
+    # 3. Add to the existing database
+    logger.info(f"Adding {len(chunks)} chunks to the Database...")
+    vector_store.add_documents(chunks) 
+    
+    logger.info(f"Successfully ingested '{file_path}' into the AI's memory!")
