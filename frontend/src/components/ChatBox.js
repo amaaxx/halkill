@@ -1,6 +1,6 @@
 import ReactMarkdown from "react-markdown";
 import { useState } from "react";
-import { askQuestion } from "../api";
+import { askQuestionStream } from "../api";
 
 function ChatBox() {
   const [question, setQuestion] = useState("");
@@ -18,10 +18,26 @@ function ChatBox() {
     setLoading(true);
   
     try {
-      const response = await askQuestion(question);
-      const aiMessage = { role: "ai", content: response };
-  
-      setMessages((prev) => [...prev, aiMessage]);
+      // 1. Immediately create an empty AI message placeholder on the screen
+      setMessages((prev) => [...prev, { role: "ai", content: "" }]);
+
+      // 2. Call the stream, passing a function that runs every time a word arrives
+      await askQuestionStream(question, (newText) => {
+        setMessages((prev) => {
+          // Clone the message array
+          const updatedMessages = [...prev];
+          const lastIndex = updatedMessages.length - 1;
+          
+          // Grab the last message (the AI placeholder) and append the new word to it
+          updatedMessages[lastIndex] = {
+            ...updatedMessages[lastIndex],
+            content: updatedMessages[lastIndex].content + newText,
+          };
+          
+          return updatedMessages; // React repaints the screen with the new word
+        });
+      });
+      
     } catch (error) {
       const errorMessage = {
         role: "ai",
@@ -33,8 +49,6 @@ function ChatBox() {
     setLoading(false);
   }
   
-  
-
   return (
     <div style={{ padding: "20px", maxWidth: "800px", margin: "auto" }}>
       <h2>Academic Engine</h2>

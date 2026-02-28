@@ -2,9 +2,10 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from rag import ask_question
+from rag import ask_question_stream
 from logger import get_logger
 import uuid
+from fastapi.responses import JSONResponse, StreamingResponse
 
 logger = get_logger(__name__)
 
@@ -63,12 +64,12 @@ def home():
 
 
 @app.post("/ask")
-def ask(q: Question, request: Request):
+async def ask(q: Question, request: Request):
 
     request_id = request.state.request_id
     logger.info(f"[{request_id}] Received query: {q.query}")
 
-    answer = ask_question(q.query)
+    answer = ask_question_stream(q.query)
 
     if not answer:
         logger.warning(f"[{request_id}] No answer found")
@@ -76,8 +77,7 @@ def ask(q: Question, request: Request):
 
     logger.info(f"[{request_id}] Answer generated successfully")
 
-    return {
-        "success": True,
-        "answer": answer,
-        "request_id": request_id
-    }
+    return StreamingResponse(
+        ask_question_stream(q.query), 
+        media_type="text/event-stream"
+    )
