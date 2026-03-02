@@ -45,6 +45,9 @@ function ChatBox() {
     if (!question.trim()) return;
   
     const userMessage = { role: "user", content: question };
+    // Capture the history BEFORE we add the new message
+    const chatHistory = messages.filter(m => !m.content.includes("❌") && !m.content.includes("Uploading"));
+    
     setMessages((prev) => [...prev, userMessage]);
     setQuestion("");
     setLoading(true);
@@ -53,8 +56,8 @@ function ChatBox() {
       // 1. Immediately create an empty AI message placeholder on the screen
       setMessages((prev) => [...prev, { role: "ai", content: "" }]);
 
-      // 2. Call the stream, passing a function that runs every time a word arrives
-      await askQuestionStream(question, (newText) => {
+      // 2. Call the stream, passing the question, the HISTORY, and the callback
+      await askQuestionStream(question, chatHistory, (newText) => {
         setMessages((prev) => {
           // Clone the message array
           const updatedMessages = [...prev];
@@ -83,7 +86,7 @@ function ChatBox() {
   
   return (
     <div style={{ padding: "20px", maxWidth: "800px", margin: "auto" }}>
-      <h2>Academic Engine</h2>
+      <h2>Halkill</h2>
   
       <div style={{ marginBottom: "20px" }}>
         {messages.map((msg, index) => (

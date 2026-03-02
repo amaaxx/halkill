@@ -1,6 +1,6 @@
 from dotenv import load_dotenv
 import os
-from langchain_community.document_loaders import PyPDFLoader
+from langchain_community.document_loaders import PyMuPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 
@@ -35,7 +35,7 @@ def create_vector_db():
         return
 
     logger.info("Loading PDF...")
-    loader = PyPDFLoader(PDF_PATH)
+    loader = PyMuPDFLoader(PDF_PATH)
     docs = loader.load()
 
     logger.info("Splitting text...")
@@ -73,19 +73,20 @@ vector_store = Chroma(
     embedding_function=embedding_function
 )
 
-retriever = vector_store.as_retriever(search_kwargs={"k": 10})
+retriever = vector_store.as_retriever(search_kwargs={"k": 5})
 
 # Prompt
 system_prompt = (
-    "You are an assistant answering questions using a document and your general knowledge.\n\n"
-    "Instructions:\n"
-    "- First, extract and present all relevant information found explicitly in the document context.\n"
-    "- Present this under a section titled 'From the Document'.\n"
-    "- If the document does not fully answer the question, then provide additional helpful explanation.\n"
-    "- Present this under a section titled 'Additional Explanation (General Knowledge)'.\n"
-    "- Do NOT mix document content and general knowledge.\n"
-    "- Be clear and structured.\n\n"
-    "{context}"
+    "You are a precise Academic and Research Assistant. Answer the user's question based on the provided context.\n\n"
+    "STRUCTURE:\n"
+    "1. Start with '### From the Document:' followed by a concise answer using ONLY provided text.\n"
+    "2. If applicable, follow with '### General Knowledge:' to provide expert context or explain medical/technical terms.\n\n"
+    "RULES:\n"
+    "- If the document is missing information, explicitly say: 'The document does not contain this specific detail.'\n"
+    "- Use bullet points for lists.\n"
+    "- Keep the tone professional.\n\n"
+    "Chat History:\n{history}\n\n"
+    "Document Context:\n{context}"
 )
 
 prompt = ChatPromptTemplate.from_messages(
@@ -101,13 +102,20 @@ logger.info("Engine is fully loaded and ready!")
 # =================================================================
 # 2. THE QUERY FUNCTION (Optimized for ultra-low latency)
 # =================================================================
-async def ask_question_stream(query: str):
+async def ask_question_stream(query: str,history: list):
+
+
+    # 0 Format the React history into a readable script for Gemini
+    formatted_history = ""
+    for msg in history[-6:]: # Only keep the last 6 messages so we don't blow up our token limit!
+        speaker = "Human" if msg["role"] == "user" else "AI"
+        formatted_history += f"{speaker}: {msg['content']}\n"
     # 1. Fetch the relevant PDF chunks asynchronously first
     docs = await retriever.ainvoke(query)
     context_text = format_docs(docs)
 
     # 2. Format the exact text for the prompt
-    messages = prompt.format_messages(context=context_text, input=query)
+    messages = prompt.format_messages(context=context_text, history=formatted_history, input=query)
 
     # 3. Open a direct, unblocked stream to Gemini
     async for chunk in llm.astream(messages):
@@ -126,7 +134,7 @@ def add_pdf_to_vector_store(file_path: str):
 
     # 1. Load the new PDF
     logger.info("Loading PDF...")
-    loader = PyPDFLoader(file_path)
+    loader = PyMuPDFLoader(file_path)
     docs = loader.load()
 
     # 2. Split it into chunks (the math we talked about for Day 5!)

@@ -1,11 +1,11 @@
 // We now pass a callback function 'onChunk' that will trigger every time a new word arrives
-export async function askQuestionStream(question, onChunk) {
+export async function askQuestionStream(question, history, onChunk) {
   const response = await fetch("http://127.0.0.1:8000/ask", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ query: question }),
+    body: JSON.stringify({ query: question, history: history }),
   });
 
   if (!response.ok) {

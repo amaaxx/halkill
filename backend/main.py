@@ -8,6 +8,7 @@ from rag import ask_question_stream, add_pdf_to_vector_store # <-- Import the ne
 from logger import get_logger
 import uuid
 from fastapi.responses import JSONResponse, StreamingResponse
+from typing import List, Dict, Any
 
 
 logger = get_logger(__name__)
@@ -59,6 +60,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 class Question(BaseModel):
     query: str
+    history: List[Dict[str, str]] = [] # Defaults to empty list if no history exists
 
 
 @app.get("/")
@@ -68,20 +70,14 @@ def home():
 
 @app.post("/ask")
 async def ask(q: Question, request: Request):
-
-    request_id = request.state.request_id
+    request_id = getattr(request.state, "request_id", "UNKNOWN")
     logger.info(f"[{request_id}] Received query: {q.query}")
-
-    answer = ask_question_stream(q.query)
-
-    if not answer:
-        logger.warning(f"[{request_id}] No answer found")
-        raise HTTPException(status_code=404, detail="No answer found")
-
+    
+    # Notice we deleted the old 'answer =' and 'if not answer:' lines here
+    
     logger.info(f"[{request_id}] Answer generated successfully")
-
     return StreamingResponse(
-        ask_question_stream(q.query), 
+        ask_question_stream(q.query, q.history),
         media_type="text/event-stream"
     )
 
