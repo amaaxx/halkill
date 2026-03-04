@@ -1,5 +1,5 @@
 import ReactMarkdown from "react-markdown";
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { askQuestionStream, uploadDocument } from "../api";
 
 function ChatBox() {
@@ -7,6 +7,11 @@ function ChatBox() {
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false); // <-- Add loading state for the file
+  const messagesEndRef = useRef(null);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
+  }, [messages]);
 
   async function handleFileUpload(event) {
     const file = event.target.files[0];
@@ -112,6 +117,7 @@ function ChatBox() {
             </div>
           </div>
         ))}
+        <div ref={messagesEndRef} />
       <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
           
           {/* FIX 2: You need this hidden input to actually select the file! */}
