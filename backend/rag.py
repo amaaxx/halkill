@@ -9,7 +9,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-
+from langchain_classic.retrievers.multi_query import MultiQueryRetriever
 from logger import get_logger
 logger = get_logger(__name__)
 
@@ -39,7 +39,7 @@ def create_vector_db():
     docs = loader.load()
 
     logger.info("Splitting text...")
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=400)
     chunks = text_splitter.split_documents(docs)
 
     logger.info("Creating Database...")
@@ -73,11 +73,18 @@ vector_store = Chroma(
     embedding_function=embedding_function
 )
 
-retriever = vector_store.as_retriever(search_kwargs={"k": 5})
+base_retriever = vector_store.as_retriever(search_kwargs={"k": 15})
+
+# FIX APPLIED HERE: Pass the actual 'llm' variable
+retriever = MultiQueryRetriever.from_llm(
+    retriever=base_retriever, 
+    llm=llm 
+)
 
 # Prompt
 system_prompt = (
     "You are a precise Academic and Research Assistant. Answer the user's question based on the provided context.\n\n"
+    "CRITICAL RULE: If the user asks for a list (like 'Units' or 'Topics'), you must scan the entire context and list EVERY instance found. Do not summarize. Do not skip items. Identify topics by their subject matter even if labels are missing.\n\n"
     "STRUCTURE:\n"
     "1. Start with '### From the Document:' followed by a concise answer using ONLY provided text.\n"
     "2. If applicable, follow with '### General Knowledge:' to provide expert context or explain medical/technical terms.\n\n"
@@ -96,7 +103,6 @@ prompt = ChatPromptTemplate.from_messages(
     ]
 )
 
-
 logger.info("Engine is fully loaded and ready!")
 
 # =================================================================
@@ -104,12 +110,12 @@ logger.info("Engine is fully loaded and ready!")
 # =================================================================
 async def ask_question_stream(query: str,history: list):
 
-
     # 0 Format the React history into a readable script for Gemini
     formatted_history = ""
     for msg in history[-6:]: # Only keep the last 6 messages so we don't blow up our token limit!
         speaker = "Human" if msg["role"] == "user" else "AI"
         formatted_history += f"{speaker}: {msg['content']}\n"
+        
     # 1. Fetch the relevant PDF chunks asynchronously first
     docs = await retriever.ainvoke(query)
     context_text = format_docs(docs)
@@ -137,9 +143,9 @@ def add_pdf_to_vector_store(file_path: str):
     loader = PyMuPDFLoader(file_path)
     docs = loader.load()
 
-    # 2. Split it into chunks (the math we talked about for Day 5!)
+    # 2. Split it into chunks (Synced with the massive chunks from the DB creator)
     logger.info("Splitting text...")
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=400)
     chunks = text_splitter.split_documents(docs)
 
     # 3. Add to the existing database

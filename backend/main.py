@@ -9,6 +9,11 @@ from logger import get_logger
 import uuid
 from fastapi.responses import JSONResponse, StreamingResponse
 from typing import List, Dict, Any
+import models
+from database import engine
+
+# This tells SQLAlchemy to create all tables in Postgres if they don't exist
+models.Base.metadata.create_all(bind=engine)
 
 
 logger = get_logger(__name__)
