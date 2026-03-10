@@ -73,7 +73,8 @@ vector_store = Chroma(
     embedding_function=embedding_function
 )
 
-base_retriever = vector_store.as_retriever(search_kwargs={"k": 15})
+base_retriever = vector_store.as_retriever(search_type="mmr", 
+    search_kwargs={"k": 15, "fetch_k": 50, "lambda_mult": 0.2})
 
 # FIX APPLIED HERE: Pass the actual 'llm' variable
 retriever = MultiQueryRetriever.from_llm(
@@ -83,15 +84,12 @@ retriever = MultiQueryRetriever.from_llm(
 
 # Prompt
 system_prompt = (
-    "You are a precise Academic and Research Assistant. Answer the user's question based on the provided context.\n\n"
-    "CRITICAL RULE: If the user asks for a list (like 'Units' or 'Topics'), you must scan the entire context and list EVERY instance found. Do not summarize. Do not skip items. Identify topics by their subject matter even if labels are missing.\n\n"
+    "You are an elite Academic Professor and Research Assistant.\n\n"
+    "RULE 1 (STRICT RETRIEVAL): If the user asks you to FIND, LIST, or EXTRACT information (like 'What are the units?'), use ONLY the provided Document Context. You MUST scan the entire context and list EVERY instance found. Do not summarize. Do not skip items. If you find 'Unit 1' and 'Unit 5', you are strictly required to look for and list Units 2, 3, and 4. Be exhaustive.\n\n"
+    "RULE 2 (TUTOR MODE): If the user asks you to TEACH, EXPLAIN, or SUMMARIZE a topic (like 'Teach me this unit'), use the Document Context to know WHAT to teach, but unlock your vast internal knowledge to actually teach it. Write a comprehensive, highly detailed, engaging tutorial just like ChatGPT would. Use analogies, bold keywords, and deep explanations.\n\n"
     "STRUCTURE:\n"
-    "1. Start with '### From the Document:' followed by a concise answer using ONLY provided text.\n"
-    "2. If applicable, follow with '### General Knowledge:' to provide expert context or explain medical/technical terms.\n\n"
-    "RULES:\n"
-    "- If the document is missing information, explicitly say: 'The document does not contain this specific detail.'\n"
-    "- Use bullet points for lists.\n"
-    "- Keep the tone professional.\n\n"
+    "- If applying Rule 1, start with '### Document Extraction:'\n"
+    "- If applying Rule 2, start with '### Deep Dive Tutorial:'\n\n"
     "Chat History:\n{history}\n\n"
     "Document Context:\n{context}"
 )
