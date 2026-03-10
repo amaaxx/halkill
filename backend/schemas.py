@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+from typing import List, Dict
 
 # 1. The data React sends us when a user signs up
 class UserCreate(BaseModel):
@@ -17,3 +18,7 @@ class UserResponse(BaseModel):
     class Config:
         # This tells Pydantic to cleanly read the SQLAlchemy User model
         from_attributes = True
+
+class Question(BaseModel):
+    query: str
+    history: List[Dict[str, str]] = []
