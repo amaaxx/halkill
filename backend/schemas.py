@@ -22,3 +22,4 @@ class UserResponse(BaseModel):
 class Question(BaseModel):
     query: str
     history: List[Dict[str, str]] = []
+    filename: str # <-- NEW: React will send the name of the active document

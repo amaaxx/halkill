@@ -58,9 +58,10 @@ logger.info("Initializing Models and Brain... Please wait.")
 
 # Setup the Brain (Gemini)
 llm = ChatGoogleGenerativeAI(
-    model="models/gemini-2.5-flash",
+    model="models/gemini-2.5-flash-lite",
     google_api_key=GOOGLE_API_KEY,
-    temperature=0.3
+    temperature=0.3,
+    max_tokens=8192
 )
 
 # Setup the Memory (ChromaDB)
@@ -73,23 +74,21 @@ vector_store = Chroma(
     embedding_function=embedding_function
 )
 
-base_retriever = vector_store.as_retriever(search_type="mmr", 
-    search_kwargs={"k": 15, "fetch_k": 50, "lambda_mult": 0.2})
 
-# FIX APPLIED HERE: Pass the actual 'llm' variable
-retriever = MultiQueryRetriever.from_llm(
-    retriever=base_retriever, 
-    llm=llm 
-)
+
+# NOTE: In your ask_question_stream function, make sure you are now passing 'query' to this 'retriever' directly:
+# docs = await retriever.ainvoke(query)
+
 
 # Prompt
 system_prompt = (
     "You are an elite Academic Professor and Research Assistant.\n\n"
-    "RULE 1 (STRICT RETRIEVAL): If the user asks you to FIND, LIST, or EXTRACT information (like 'What are the units?'), use ONLY the provided Document Context. You MUST scan the entire context and list EVERY instance found. Do not summarize. Do not skip items. If you find 'Unit 1' and 'Unit 5', you are strictly required to look for and list Units 2, 3, and 4. Be exhaustive.\n\n"
-    "RULE 2 (TUTOR MODE): If the user asks you to TEACH, EXPLAIN, or SUMMARIZE a topic (like 'Teach me this unit'), use the Document Context to know WHAT to teach, but unlock your vast internal knowledge to actually teach it. Write a comprehensive, highly detailed, engaging tutorial just like ChatGPT would. Use analogies, bold keywords, and deep explanations.\n\n"
-    "STRUCTURE:\n"
-    "- If applying Rule 1, start with '### Document Extraction:'\n"
-    "- If applying Rule 2, start with '### Deep Dive Tutorial:'\n\n"
+    "RULE 1 (STRICT RETRIEVAL): When asked to extract or list information, use ONLY the provided Document Context. "
+    "You must perform an exhaustive scan of the context. Do not skip any sections, items, or details. "
+    "Your goal is to provide a complete and comprehensive map of what is in the document without summarization.\n\n"
+    "RULE 2 (TUTOR MODE): When asked to explain, teach, or summarize, use the Document Context as your primary source "
+    "to define the scope, then use your internal expertise to provide a deep, high-level educational experience. "
+    "Use bolding, bullet points, and clear structural hierarchies to make the information easy to digest.\n\n"
     "Chat History:\n{history}\n\n"
     "Document Context:\n{context}"
 )
@@ -106,16 +105,32 @@ logger.info("Engine is fully loaded and ready!")
 # =================================================================
 # 2. THE QUERY FUNCTION (Optimized for ultra-low latency)
 # =================================================================
-async def ask_question_stream(query: str,history: list):
+async def ask_question_stream(query: str,history: list, username: str, filename: str):
 
     # 0 Format the React history into a readable script for Gemini
     formatted_history = ""
     for msg in history[-6:]: # Only keep the last 6 messages so we don't blow up our token limit!
         speaker = "Human" if msg["role"] == "user" else "AI"
         formatted_history += f"{speaker}: {msg['content']}\n"
+
+    # THE UPGRADE: ChromaDB now requires an explicit '$and' for multiple filters
+    dynamic_retriever = vector_store.as_retriever(
+        search_type="mmr", 
+        search_kwargs={
+            "k": 40,          
+            "fetch_k": 150,   
+            "lambda_mult": 0.2,
+            "filter": {
+                "$and": [
+                    {"username": username},
+                    {"source": filename}
+                ]
+            } # <-- This is the exact format ChromaDB expects
+        }
+    )
         
     # 1. Fetch the relevant PDF chunks asynchronously first
-    docs = await retriever.ainvoke(query)
+    docs = await dynamic_retriever.ainvoke(query)
     context_text = format_docs(docs)
 
     # 2. Format the exact text for the prompt
@@ -129,7 +144,7 @@ async def ask_question_stream(query: str,history: list):
 # =================================================================
 # 3. DYNAMIC INGESTION (Adding new files on the fly)
 # =================================================================
-def add_pdf_to_vector_store(file_path: str):
+def add_pdf_to_vector_store(file_path: str, username: str, filename: str):
     logger.info(f"Processing new PDF: {file_path}")
     
     if not os.path.exists(file_path):
@@ -145,6 +160,11 @@ def add_pdf_to_vector_store(file_path: str):
     logger.info("Splitting text...")
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=400)
     chunks = text_splitter.split_documents(docs)
+
+    # THE UPGRADE: Tag every single chunk with the owner and the filename
+    for chunk in chunks:
+        chunk.metadata["username"] = username
+        chunk.metadata["source"] = filename
 
     # 3. Add to the existing database
     logger.info(f"Adding {len(chunks)} chunks to the Database...")

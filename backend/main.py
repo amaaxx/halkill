@@ -1,10 +1,10 @@
 import os
 import shutil
-from fastapi import FastAPI, HTTPException, Request, UploadFile, File #  Add UploadFile and File
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from rag import ask_question_stream, add_pdf_to_vector_store # <-- Import the new function
+from rag import ask_question_stream, add_pdf_to_vector_store
 from logger import get_logger
 import uuid
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -24,7 +24,6 @@ from database import get_db
 
 # This tells SQLAlchemy to create all tables in Postgres if they don't exist
 models.Base.metadata.create_all(bind=engine)
-
 
 logger = get_logger(__name__)
 
@@ -121,7 +120,6 @@ def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(new_user)
     
-    # Pydantic (UserResponse) automatically strips the password before returning this
     return new_user
 
 
@@ -145,14 +143,23 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
     return {"access_token": access_token, "token_type": "bearer"}
 
 
-class Question(BaseModel):
-    query: str
-    history: List[Dict[str, str]] = [] # Defaults to empty list if no history exists
-
-
 @app.get("/")
 def home():
     return {"status": "Academic Engine is Active"}
+
+
+# NEW ROUTE: Fetch the user's library
+@app.get("/documents")
+def get_user_documents(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    # Find all documents belonging to this user
+    docs = db.query(models.Document).filter(models.Document.owner_id == current_user.id).all()
+    # Extract just the unique filenames
+    unique_files = list(set([doc.filename for doc in docs]))
+    
+    return {"files": unique_files}
 
 
 @app.post("/ask")
@@ -163,30 +170,40 @@ async def ask(
 ):
     request_id = getattr(request.state, "request_id", "UNKNOWN")
     
-    # We now know EXACTLY who is asking the question
-    logger.info(f"[{request_id}] User '{current_user.username}' is querying: {q.query}")
+    # We now know EXACTLY who is asking the question, and ABOUT WHICH FILE
+    logger.info(f"[{request_id}] User '{current_user.username}' is querying '{q.filename}': {q.query}")
     
     logger.info(f"[{request_id}] Initiating streaming response...")
     
     return StreamingResponse(
-        ask_question_stream(q.query, q.history),
+        # Pass the extra variables into rag.py
+        ask_question_stream(q.query, q.history, current_user.username, q.filename),
         media_type="text/event-stream"
     )
 
 @app.post("/upload")
-async def upload_document(file: UploadFile = File(...)):
+async def upload_document(
+    file: UploadFile = File(...),
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db) # <-- NEW: Give this route access to SQLite
+):
     os.makedirs("data", exist_ok=True)
     file_path = os.path.join("data", file.filename)
     
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
         
-    logger.info(f"Successfully uploaded: {file.filename}")
+    logger.info(f"User '{current_user.username}' successfully uploaded: {file.filename}")
     
-    # THE UPGRADE: Process the PDF and add it to the Vector Database
+    # THE UPGRADE: Save the record in the SQL database so the user can fetch it later
+    new_doc = models.Document(filename=file.filename, owner_id=current_user.id)
+    db.add(new_doc)
+    db.commit()
+    
+    # Process the PDF and add it to the Vector Database
     try:
-        # This calls LangChain to chop up the PDF and embed it
-        add_pdf_to_vector_store(file_path) 
+        # Pass the file path, the username, and the filename into rag.py
+        add_pdf_to_vector_store(file_path, current_user.username, file.filename) 
     except Exception as e:
         logger.error(f"Failed to process PDF: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to extract text from PDF: {str(e)}")
