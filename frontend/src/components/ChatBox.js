@@ -1,6 +1,15 @@
 import ReactMarkdown from "react-markdown";
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { useState, useRef, useEffect } from "react";
-import { askQuestionStream, uploadDocument, fetchUserLibrary } from "../api";
+import { 
+    askQuestionStream, 
+    uploadDocument, 
+    fetchUserLibrary, 
+    fetchUserChats, 
+    createChatSession, 
+    fetchChatHistory 
+} from "../api";
 
 function ChatBox() {
   const [question, setQuestion] = useState("");
@@ -8,67 +17,81 @@ function ChatBox() {
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   
-  // New States for the Library
-  const [activeFile, setActiveFile] = useState(""); 
+  // Library & Session States
   const [libraryFiles, setLibraryFiles] = useState([]);
-  const [loadingLibrary, setLoadingLibrary] = useState(true);
+  const [chatSessions, setChatSessions] = useState([]);
+  const [activeSession, setActiveSession] = useState(null); 
+  const [loadingData, setLoadingData] = useState(true);
 
   const messagesEndRef = useRef(null);
 
-  // 1. Fetch the user's library as soon as they log in
+  // 1. Initial Load: Fetch Books and Chat Folders
   useEffect(() => {
-    async function loadLibrary() {
+    async function loadInitialData() {
       try {
-        const data = await fetchUserLibrary();
-        setLibraryFiles(data.files);
-        // Automatically select the first file if they have any
-        if (data.files.length > 0) {
-          setActiveFile(data.files[0]);
+        const [libData, chatsData] = await Promise.all([
+            fetchUserLibrary(),
+            fetchUserChats()
+        ]);
+        setLibraryFiles(libData.files);
+        setChatSessions(chatsData);
+        
+        // If they have a previous chat, open it automatically
+        if (chatsData.length > 0) {
+            handleSelectSession(chatsData[0]);
         }
       } catch (error) {
-        console.error("Failed to fetch library:", error);
+        console.error("Failed to load data:", error);
       } finally {
-        setLoadingLibrary(false);
+        setLoadingData(false);
       }
     }
-    loadLibrary();
+    loadInitialData();
   }, []);
 
+  // Scroll to bottom when messages update
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
   }, [messages]);
+
+  // 2. Select a Chat Session and load its history
+  async function handleSelectSession(session) {
+      setActiveSession(session);
+      setMessages([]); // Clear screen while loading
+      try {
+          const history = await fetchChatHistory(session.id);
+          setMessages(history);
+      } catch (error) {
+          console.error("Failed to load history", error);
+      }
+  }
+
+  // 3. Start a brand new chat from a Library file
+  async function handleStartNewChat(filename) {
+      try {
+          const newSession = await createChatSession(filename);
+          setChatSessions(prev => [newSession, ...prev]);
+          setActiveSession(newSession);
+          setMessages([{ role: "ai", content: `I am ready to answer questions about **${filename}**. What would you like to know?` }]);
+      } catch (error) {
+          console.error("Failed to start new chat", error);
+      }
+  }
 
   async function handleFileUpload(event) {
     const file = event.target.files[0];
     if (!file) return;
 
     setUploading(true);
-    setMessages((prev) => [...prev, { role: "ai", content: `Uploading ${file.name}...` }]);
-
     try {
       await uploadDocument(file);
-      
-      setActiveFile(file.name); 
-      
-      // Add the new file to the sidebar immediately if it's not already there
       if (!libraryFiles.includes(file.name)) {
         setLibraryFiles((prev) => [...prev, file.name]);
       }
-      
-      setMessages((prev) => {
-        const updated = [...prev];
-        updated[updated.length - 1] = { 
-            role: "ai", 
-            content: `✅ Successfully uploaded **${file.name}**. You can now ask questions about it!` 
-        };
-        return updated;
-      });
+      // Automatically start a new chat with this newly uploaded file
+      await handleStartNewChat(file.name);
     } catch (error) {
-      setMessages((prev) => {
-        const updated = [...prev];
-        updated[updated.length - 1] = { role: "ai", content: `❌ Upload Error: ${error.message}` };
-        return updated;
-      });
+      alert("Upload failed: " + error.message);
     } finally {
       setUploading(false);
       event.target.value = null; 
@@ -76,15 +99,10 @@ function ChatBox() {
   }
 
   async function handleAsk() {
-    if (!question.trim()) return;
-    
-    if (!activeFile) {
-        alert("Please upload or select a document from your library first!");
-        return;
-    }
+    if (!question.trim() || !activeSession) return;
   
     const userMessage = { role: "user", content: question };
-    const chatHistory = messages.filter(m => !m.content.includes("❌") && !m.content.includes("Uploading"));
+    const chatHistory = messages.filter(m => m.role === "user" || m.role === "ai");
     
     setMessages((prev) => [...prev, userMessage]);
     setQuestion("");
@@ -93,104 +111,126 @@ function ChatBox() {
     try {
       setMessages((prev) => [...prev, { role: "ai", content: "" }]);
 
-      await askQuestionStream(question, chatHistory, (newText) => {
-        setMessages((prev) => {
-          const updatedMessages = [...prev];
-          const lastIndex = updatedMessages.length - 1;
-          
-          updatedMessages[lastIndex] = {
-            ...updatedMessages[lastIndex],
-            content: updatedMessages[lastIndex].content + newText,
-          };
-          
-          return updatedMessages;
-        });
-      }, activeFile);
+      await askQuestionStream(
+          question, 
+          chatHistory, 
+          (newText) => {
+            setMessages((prev) => {
+              const updatedMessages = [...prev];
+              const lastIndex = updatedMessages.length - 1;
+              updatedMessages[lastIndex] = {
+                ...updatedMessages[lastIndex],
+                content: updatedMessages[lastIndex].content + newText,
+              };
+              return updatedMessages;
+            });
+          }, 
+          activeSession.document_filename, 
+          activeSession.id // Pass the Session ID!
+      );
       
     } catch (error) {
       setMessages((prev) => [...prev, { role: "ai", content: "Error: " + error.message }]);
     }
-  
     setLoading(false);
   }
   
   return (
-    // The Main Flexbox Container
     <div style={{ display: "flex", height: "100vh", backgroundColor: "#121212", color: "white", fontFamily: "sans-serif" }}>
       
-      {/* ========================================== */}
-      {/* LEFT SIDEBAR: The Library                  */}
-      {/* ========================================== */}
+      {/* LEFT SIDEBAR */}
       <div style={{ width: "260px", backgroundColor: "#1e1e1e", borderRight: "1px solid #333", display: "flex", flexDirection: "column", padding: "20px" }}>
-        <h2 style={{ marginTop: 0, marginBottom: "20px", fontSize: "1.2rem", color: "#e0e0e0" }}>📚 My Library</h2>
         
-        {loadingLibrary ? (
-            <p style={{ color: "#888", fontSize: "0.9rem" }}>Loading documents...</p>
-        ) : libraryFiles.length === 0 ? (
-            <p style={{ color: "#888", fontSize: "0.9rem" }}>No documents yet.</p>
-        ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: "8px", overflowY: "auto" }}>
-                {libraryFiles.map((file, index) => (
-                    <button
-                        key={index}
-                        onClick={() => setActiveFile(file)}
-                        style={{
-                            padding: "10px",
-                            textAlign: "left",
-                            backgroundColor: activeFile === file ? "#2d2d2d" : "transparent",
-                            color: activeFile === file ? "#4caf50" : "#ccc",
-                            border: activeFile === file ? "1px solid #4caf50" : "1px solid transparent",
-                            borderRadius: "6px",
-                            cursor: "pointer",
-                            transition: "all 0.2s",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap"
-                        }}
-                    >
-                        📄 {file}
-                    </button>
-                ))}
-            </div>
-        )}
+        {/* Chat History Section */}
+        <h2 style={{ marginTop: 0, marginBottom: "15px", fontSize: "1rem", color: "#aaa", textTransform: "uppercase" }}>Recent Chats</h2>
+        <div style={{ display: "flex", flexDirection: "column", gap: "5px", overflowY: "auto", flex: 1, marginBottom: "20px" }}>
+            {chatSessions.map((session) => (
+                <button
+                    key={session.id}
+                    onClick={() => handleSelectSession(session)}
+                    style={{
+                        padding: "10px", textAlign: "left", borderRadius: "6px", cursor: "pointer", border: "none",
+                        backgroundColor: activeSession?.id === session.id ? "#2d2d2d" : "transparent",
+                        color: activeSession?.id === session.id ? "white" : "#ccc",
+                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"
+                    }}
+                >
+                    💬 {session.title}
+                </button>
+            ))}
+        </div>
 
-        <div style={{ marginTop: "auto", paddingTop: "20px" }}>
+        {/* Library Section */}
+        <h2 style={{ marginTop: 0, marginBottom: "15px", fontSize: "1rem", color: "#aaa", textTransform: "uppercase" }}>My Library</h2>
+        <div style={{ display: "flex", flexDirection: "column", gap: "5px", overflowY: "auto", maxHeight: "30%" }}>
+            {libraryFiles.map((file, index) => (
+                <button
+                    key={index}
+                    onClick={() => handleStartNewChat(file)}
+                    style={{
+                        padding: "8px", textAlign: "left", backgroundColor: "transparent", color: "#4caf50",
+                        border: "1px solid #4caf50", borderRadius: "6px", cursor: "pointer", fontSize: "0.85rem"
+                    }}
+                >
+                    + New Chat: {file}
+                </button>
+            ))}
+        </div>
+
+        <div style={{ marginTop: "20px", paddingTop: "20px", borderTop: "1px solid #333" }}>
             <input type="file" id="file-upload" accept=".pdf" style={{ display: "none" }} onChange={handleFileUpload} />
             <button
                 onClick={() => document.getElementById("file-upload").click()}
                 disabled={uploading || loading}
                 style={{ width: "100%", padding: "10px", backgroundColor: "#007bff", color: "white", border: "none", borderRadius: "5px", cursor: "pointer", fontWeight: "bold" }}
             >
-                {uploading ? "Uploading..." : "+ Upload New PDF"}
+                {uploading ? "Uploading..." : "📎 Upload PDF"}
             </button>
         </div>
       </div>
 
-      {/* ========================================== */}
-      {/* RIGHT PANEL: The Chat Engine               */}
-      {/* ========================================== */}
+      {/* RIGHT PANEL: Chat Engine */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: "20px 40px", maxWidth: "900px", margin: "0 auto" }}>
         
         <div style={{ paddingBottom: "20px", borderBottom: "1px solid #333", marginBottom: "20px" }}>
             <h1 style={{ margin: 0 }}>Halkill Engine</h1>
-            {activeFile && <p style={{ margin: "5px 0 0 0", color: "#4caf50", fontSize: "0.9rem" }}>Currently querying: <strong>{activeFile}</strong></p>}
+            {activeSession && <p style={{ margin: "5px 0 0 0", color: "#888", fontSize: "0.9rem" }}>Active Document: <strong style={{color: "#4caf50"}}>{activeSession.document_filename}</strong></p>}
         </div>
   
-        {/* Chat Messages Area */}
+        {/* Messages Area */}
         <div style={{ flex: 1, overflowY: "auto", paddingRight: "10px", display: "flex", flexDirection: "column", gap: "15px" }}>
             {messages.map((msg, index) => (
             <div key={index} style={{ textAlign: msg.role === "user" ? "right" : "left" }}>
                 <div style={{
-                    display: "inline-block",
-                    padding: "12px 18px",
+                    display: "inline-block", padding: "12px 18px",
                     borderRadius: msg.role === "user" ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
                     backgroundColor: msg.role === "user" ? "#007bff" : "#2d2d2d",
-                    color: "white",
-                    maxWidth: "80%",
-                    boxShadow: "0 2px 5px rgba(0,0,0,0.2)",
-                    lineHeight: "1.5"
+                    color: "white", maxWidth: "85%", boxShadow: "0 2px 5px rgba(0,0,0,0.2)", lineHeight: "1.6", textAlign: "left"
                 }}>
-                <ReactMarkdown>{msg.content}</ReactMarkdown>
+                {/* ADVANCED MARKDOWN RENDERING */}
+                <ReactMarkdown
+                    components={{
+                        code({node, inline, className, children, ...props}) {
+                            const match = /language-(\w+)/.exec(className || '')
+                            return !inline && match ? (
+                            <SyntaxHighlighter
+                                style={vscDarkPlus}
+                                language={match[1]}
+                                PreTag="div"
+                                {...props}
+                            >
+                                {String(children).replace(/\n$/, '')}
+                            </SyntaxHighlighter>
+                            ) : (
+                            <code className={className} style={{backgroundColor: "#444", padding: "2px 4px", borderRadius: "4px"}} {...props}>
+                                {children}
+                            </code>
+                            )
+                        }
+                    }}
+                >
+                    {msg.content}
+                </ReactMarkdown>
                 </div>
             </div>
             ))}
@@ -202,20 +242,19 @@ function ChatBox() {
             <input
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
-                placeholder={activeFile ? `Ask about ${activeFile}...` : "Select a document to start..."}
-                disabled={!activeFile}
+                placeholder={activeSession ? `Ask about ${activeSession.document_filename}...` : "Select a document to start a chat..."}
+                disabled={!activeSession}
                 style={{ flexGrow: 1, padding: "12px", borderRadius: "5px", border: "none", backgroundColor: "transparent", color: "white", outline: "none", fontSize: "1rem" }}
                 onKeyDown={(e) => { if (e.key === 'Enter') handleAsk(); }} 
             />
             <button
                 onClick={handleAsk}
-                disabled={loading || uploading || !activeFile}
-                style={{ padding: "10px 20px", backgroundColor: "#007bff", color: "white", border: "none", borderRadius: "5px", cursor: "pointer", fontWeight: "bold", opacity: (!activeFile || loading) ? 0.5 : 1 }}
+                disabled={loading || uploading || !activeSession}
+                style={{ padding: "10px 20px", backgroundColor: "#007bff", color: "white", border: "none", borderRadius: "5px", cursor: "pointer", fontWeight: "bold", opacity: (!activeSession || loading) ? 0.5 : 1 }}
             >
                 {loading ? "..." : "Send"}
             </button>
         </div>
-
       </div> 
     </div>
   );
