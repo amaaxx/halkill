@@ -1,13 +1,38 @@
 import ReactMarkdown from "react-markdown";
 import { useState, useRef, useEffect } from "react";
-import { askQuestionStream, uploadDocument } from "../api";
+import { askQuestionStream, uploadDocument, fetchUserLibrary } from "../api";
 
 function ChatBox() {
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [uploading, setUploading] = useState(false); // <-- Add loading state for the file
+  const [uploading, setUploading] = useState(false);
+  
+  // New States for the Library
+  const [activeFile, setActiveFile] = useState(""); 
+  const [libraryFiles, setLibraryFiles] = useState([]);
+  const [loadingLibrary, setLoadingLibrary] = useState(true);
+
   const messagesEndRef = useRef(null);
+
+  // 1. Fetch the user's library as soon as they log in
+  useEffect(() => {
+    async function loadLibrary() {
+      try {
+        const data = await fetchUserLibrary();
+        setLibraryFiles(data.files);
+        // Automatically select the first file if they have any
+        if (data.files.length > 0) {
+          setActiveFile(data.files[0]);
+        }
+      } catch (error) {
+        console.error("Failed to fetch library:", error);
+      } finally {
+        setLoadingLibrary(false);
+      }
+    }
+    loadLibrary();
+  }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
@@ -18,13 +43,18 @@ function ChatBox() {
     if (!file) return;
 
     setUploading(true);
-    // Add a temporary message to the UI
     setMessages((prev) => [...prev, { role: "ai", content: `Uploading ${file.name}...` }]);
 
     try {
       await uploadDocument(file);
       
-      // Update the UI to show success
+      setActiveFile(file.name); 
+      
+      // Add the new file to the sidebar immediately if it's not already there
+      if (!libraryFiles.includes(file.name)) {
+        setLibraryFiles((prev) => [...prev, file.name]);
+      }
+      
       setMessages((prev) => {
         const updated = [...prev];
         updated[updated.length - 1] = { 
@@ -41,16 +71,19 @@ function ChatBox() {
       });
     } finally {
       setUploading(false);
-      // Reset the input so you can upload the same file again if needed
       event.target.value = null; 
     }
   }
 
   async function handleAsk() {
     if (!question.trim()) return;
+    
+    if (!activeFile) {
+        alert("Please upload or select a document from your library first!");
+        return;
+    }
   
     const userMessage = { role: "user", content: question };
-    // Capture the history BEFORE we add the new message
     const chatHistory = messages.filter(m => !m.content.includes("❌") && !m.content.includes("Uploading"));
     
     setMessages((prev) => [...prev, userMessage]);
@@ -58,105 +91,134 @@ function ChatBox() {
     setLoading(true);
   
     try {
-      // 1. Immediately create an empty AI message placeholder on the screen
       setMessages((prev) => [...prev, { role: "ai", content: "" }]);
 
-      // 2. Call the stream, passing the question, the HISTORY, and the callback
       await askQuestionStream(question, chatHistory, (newText) => {
         setMessages((prev) => {
-          // Clone the message array
           const updatedMessages = [...prev];
           const lastIndex = updatedMessages.length - 1;
           
-          // Grab the last message (the AI placeholder) and append the new word to it
           updatedMessages[lastIndex] = {
             ...updatedMessages[lastIndex],
             content: updatedMessages[lastIndex].content + newText,
           };
           
-          return updatedMessages; // React repaints the screen with the new word
+          return updatedMessages;
         });
-      });
+      }, activeFile);
       
     } catch (error) {
-      const errorMessage = {
-        role: "ai",
-        content: "Error: " + error.message,
-      };
-      setMessages((prev) => [...prev, errorMessage]);
+      setMessages((prev) => [...prev, { role: "ai", content: "Error: " + error.message }]);
     }
   
     setLoading(false);
   }
   
   return (
-    <div style={{ padding: "20px", maxWidth: "800px", margin: "auto" }}>
-      <h2>Halkill</h2>
-  
-      <div style={{ marginBottom: "20px" }}>
-        {messages.map((msg, index) => (
-          <div
-            key={index}
-            style={{
-              textAlign: msg.role === "user" ? "right" : "left",
-              marginBottom: "10px",
-            }}
-          >
-            <div
-              style={{
-                display: "inline-block",
-                padding: "10px 15px",
-                borderRadius: "15px",
-                backgroundColor:
-                  msg.role === "user" ? "#007bff" : "#2d2d2d",
-                color: "white",
-                maxWidth: "70%",
-              }}
-            >
-              <ReactMarkdown>{msg.content}</ReactMarkdown>
+    // The Main Flexbox Container
+    <div style={{ display: "flex", height: "100vh", backgroundColor: "#121212", color: "white", fontFamily: "sans-serif" }}>
+      
+      {/* ========================================== */}
+      {/* LEFT SIDEBAR: The Library                  */}
+      {/* ========================================== */}
+      <div style={{ width: "260px", backgroundColor: "#1e1e1e", borderRight: "1px solid #333", display: "flex", flexDirection: "column", padding: "20px" }}>
+        <h2 style={{ marginTop: 0, marginBottom: "20px", fontSize: "1.2rem", color: "#e0e0e0" }}>📚 My Library</h2>
+        
+        {loadingLibrary ? (
+            <p style={{ color: "#888", fontSize: "0.9rem" }}>Loading documents...</p>
+        ) : libraryFiles.length === 0 ? (
+            <p style={{ color: "#888", fontSize: "0.9rem" }}>No documents yet.</p>
+        ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px", overflowY: "auto" }}>
+                {libraryFiles.map((file, index) => (
+                    <button
+                        key={index}
+                        onClick={() => setActiveFile(file)}
+                        style={{
+                            padding: "10px",
+                            textAlign: "left",
+                            backgroundColor: activeFile === file ? "#2d2d2d" : "transparent",
+                            color: activeFile === file ? "#4caf50" : "#ccc",
+                            border: activeFile === file ? "1px solid #4caf50" : "1px solid transparent",
+                            borderRadius: "6px",
+                            cursor: "pointer",
+                            transition: "all 0.2s",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap"
+                        }}
+                    >
+                        📄 {file}
+                    </button>
+                ))}
             </div>
-          </div>
-        ))}
-        <div ref={messagesEndRef} />
-      <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-          
-          {/* FIX 2: You need this hidden input to actually select the file! */}
-          <input
-            type="file"
-            id="file-upload"
-            accept=".pdf"
-            style={{ display: "none" }}
-            onChange={handleFileUpload}
-          />
-          
-          {/* Upload Button */}
-          <button
-            onClick={() => document.getElementById("file-upload").click()}
-            disabled={uploading || loading}
-            style={{ padding: "8px 15px", backgroundColor: "#28a745", color: "white", border: "none", borderRadius: "5px", cursor: "pointer" }}
-          >
-            {uploading ? "..." : "📎 Upload PDF"}
-          </button>
+        )}
 
-          <input
-            value={question}
-            onChange={(e) => setQuestion(e.target.value)}
-            placeholder="Ask from your textbook..."
-            style={{ flexGrow: 1, padding: "8px", borderRadius: "5px", border: "1px solid #ccc" }}
-            onKeyDown={(e) => { if (e.key === 'Enter') handleAsk(); }} 
-          />
-          
-          <button
-            onClick={handleAsk}
-            disabled={loading || uploading}
-            style={{ padding: "8px 15px", backgroundColor: "#007bff", color: "white", border: "none", borderRadius: "5px", cursor: "pointer" }}
-          >
-            {loading ? "Processing..." : "Ask"}
-          </button>
+        <div style={{ marginTop: "auto", paddingTop: "20px" }}>
+            <input type="file" id="file-upload" accept=".pdf" style={{ display: "none" }} onChange={handleFileUpload} />
+            <button
+                onClick={() => document.getElementById("file-upload").click()}
+                disabled={uploading || loading}
+                style={{ width: "100%", padding: "10px", backgroundColor: "#007bff", color: "white", border: "none", borderRadius: "5px", cursor: "pointer", fontWeight: "bold" }}
+            >
+                {uploading ? "Uploading..." : "+ Upload New PDF"}
+            </button>
         </div>
-      </div> 
       </div>
-    );
+
+      {/* ========================================== */}
+      {/* RIGHT PANEL: The Chat Engine               */}
+      {/* ========================================== */}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: "20px 40px", maxWidth: "900px", margin: "0 auto" }}>
+        
+        <div style={{ paddingBottom: "20px", borderBottom: "1px solid #333", marginBottom: "20px" }}>
+            <h1 style={{ margin: 0 }}>Halkill Engine</h1>
+            {activeFile && <p style={{ margin: "5px 0 0 0", color: "#4caf50", fontSize: "0.9rem" }}>Currently querying: <strong>{activeFile}</strong></p>}
+        </div>
+  
+        {/* Chat Messages Area */}
+        <div style={{ flex: 1, overflowY: "auto", paddingRight: "10px", display: "flex", flexDirection: "column", gap: "15px" }}>
+            {messages.map((msg, index) => (
+            <div key={index} style={{ textAlign: msg.role === "user" ? "right" : "left" }}>
+                <div style={{
+                    display: "inline-block",
+                    padding: "12px 18px",
+                    borderRadius: msg.role === "user" ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
+                    backgroundColor: msg.role === "user" ? "#007bff" : "#2d2d2d",
+                    color: "white",
+                    maxWidth: "80%",
+                    boxShadow: "0 2px 5px rgba(0,0,0,0.2)",
+                    lineHeight: "1.5"
+                }}>
+                <ReactMarkdown>{msg.content}</ReactMarkdown>
+                </div>
+            </div>
+            ))}
+            <div ref={messagesEndRef} />
+        </div>
+        
+        {/* Input Area */}
+        <div style={{ display: "flex", gap: "10px", marginTop: "20px", padding: "10px", backgroundColor: "#1e1e1e", borderRadius: "8px" }}>
+            <input
+                value={question}
+                onChange={(e) => setQuestion(e.target.value)}
+                placeholder={activeFile ? `Ask about ${activeFile}...` : "Select a document to start..."}
+                disabled={!activeFile}
+                style={{ flexGrow: 1, padding: "12px", borderRadius: "5px", border: "none", backgroundColor: "transparent", color: "white", outline: "none", fontSize: "1rem" }}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleAsk(); }} 
+            />
+            <button
+                onClick={handleAsk}
+                disabled={loading || uploading || !activeFile}
+                style={{ padding: "10px 20px", backgroundColor: "#007bff", color: "white", border: "none", borderRadius: "5px", cursor: "pointer", fontWeight: "bold", opacity: (!activeFile || loading) ? 0.5 : 1 }}
+            >
+                {loading ? "..." : "Send"}
+            </button>
+        </div>
+
+      </div> 
+    </div>
+  );
 }
 
 export default ChatBox;
