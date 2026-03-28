@@ -102,7 +102,9 @@ function ChatBox() {
     if (!question.trim() || !activeSession) return;
   
     const userMessage = { role: "user", content: question };
-    const chatHistory = messages.filter(m => m.role === "user" || m.role === "ai");
+    const chatHistory = messages
+    .filter(m => m.role === "user" || m.role === "ai")
+    .map(m => ({ role: m.role, content: m.content })); // <-- We map it to ONLY send text!
     
     setMessages((prev) => [...prev, userMessage]);
     setQuestion("");

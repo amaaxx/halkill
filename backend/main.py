@@ -2,25 +2,21 @@ import os
 import shutil
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel
-from rag import ask_question_stream, add_pdf_to_vector_store
-from logger import get_logger
-import uuid
 from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel
 from typing import List, Dict, Any
-
-from database import engine
-
-from fastapi import Depends, status
-from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy.orm import Session
-from fastapi.security import OAuth2PasswordBearer
-from jose import JWTError, jwt
+import uuid
 
 # Import your local Layer 4 files
+from database import engine, get_db
 import models, schemas, security
-from database import get_db
+from rag import ask_question_stream, add_pdf_to_vector_store
+from logger import get_logger
+
+from fastapi import Depends, status
+from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
+from sqlalchemy.orm import Session
+from jose import JWTError, jwt
 
 # This tells SQLAlchemy to create all tables in Postgres if they don't exist
 models.Base.metadata.create_all(bind=engine)
@@ -74,13 +70,8 @@ async def add_request_id(request: Request, call_next):
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-
     request_id = getattr(request.state, "request_id", "unknown")
-
-    logger.error(
-        f"[{request_id}] Unhandled error",
-        exc_info=True
-    )
+    logger.error(f"[{request_id}] Unhandled error", exc_info=True)
 
     return JSONResponse(
         status_code=500,
@@ -100,22 +91,18 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 @app.post("/register", response_model=schemas.UserResponse)
 def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
-    # 1. Check if the username is already taken
     existing_user = db.query(models.User).filter(models.User.username == user.username).first()
     if existing_user:
         raise HTTPException(status_code=400, detail="Username already registered")
     
-    # 2. Scramble (hash) the plain text password
     hashed_pw = security.get_password_hash(user.password)
     
-    # 3. Build the database record
     new_user = models.User(
         username=user.username,
         email=user.email,
         hashed_password=hashed_pw
     )
     
-    # 4. Save to PostgreSQL
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
@@ -125,10 +112,8 @@ def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
 
 @app.post("/token")
 def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    # 1. Find the user in the database
     user = db.query(models.User).filter(models.User.username == form_data.username).first()
     
-    # 2. Verify existence AND check if the password matches the hash
     if not user or not security.verify_password(form_data.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -136,10 +121,7 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    # 3. Generate the Digital ID Card (JWT)
     access_token = security.create_access_token(data={"sub": user.username})
-    
-    # 4. Hand the token back to the frontend
     return {"access_token": access_token, "token_type": "bearer"}
 
 
@@ -148,18 +130,71 @@ def home():
     return {"status": "Academic Engine is Active"}
 
 
-# NEW ROUTE: Fetch the user's library
+# ==========================================
+# DOCUMENT & CHAT ROUTES (The Library & Memory)
+# ==========================================
+
 @app.get("/documents")
 def get_user_documents(
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    # Find all documents belonging to this user
     docs = db.query(models.Document).filter(models.Document.owner_id == current_user.id).all()
-    # Extract just the unique filenames
     unique_files = list(set([doc.filename for doc in docs]))
-    
     return {"files": unique_files}
+
+
+class ChatCreate(BaseModel):
+    filename: str
+
+@app.post("/chats", response_model=schemas.ChatSessionResponse)
+def create_chat_session(
+    chat_req: ChatCreate,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    # Create a new "Folder" for this conversation
+    new_chat = models.ChatSession(
+        title=f"Chat about {chat_req.filename}",
+        document_filename=chat_req.filename,
+        owner_id=current_user.id
+    )
+    db.add(new_chat)
+    db.commit()
+    db.refresh(new_chat)
+    return new_chat
+
+@app.get("/chats", response_model=List[schemas.ChatSessionResponse])
+def get_user_chats(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    # Fetch all chat sessions for the sidebar, newest first
+    return db.query(models.ChatSession)\
+        .filter(models.ChatSession.owner_id == current_user.id)\
+        .order_by(models.ChatSession.created_at.desc())\
+        .all()
+
+@app.get("/chats/{session_id}/messages", response_model=List[schemas.MessageResponse])
+def get_chat_history(
+    session_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    # Verify the user actually owns this chat
+    session = db.query(models.ChatSession).filter(
+        models.ChatSession.id == session_id, 
+        models.ChatSession.owner_id == current_user.id
+    ).first()
+    
+    if not session:
+        raise HTTPException(status_code=404, detail="Chat not found")
+        
+    # Return all messages in chronological order
+    return db.query(models.ChatMessage)\
+        .filter(models.ChatMessage.session_id == session_id)\
+        .order_by(models.ChatMessage.created_at.asc())\
+        .all()
 
 
 @app.post("/ask")
@@ -169,15 +204,16 @@ async def ask(
     current_user: models.User = Depends(get_current_user) # The Vault Lock
 ):
     request_id = getattr(request.state, "request_id", "UNKNOWN")
+    logger.info(f"[{request_id}] User '{current_user.username}' is querying '{q.filename}' in session {q.session_id}")
     
-    # We now know EXACTLY who is asking the question, and ABOUT WHICH FILE
-    logger.info(f"[{request_id}] User '{current_user.username}' is querying '{q.filename}': {q.query}")
-    
+    # We must have a session ID to save the memory!
+    if not q.session_id:
+        raise HTTPException(status_code=400, detail="session_id is required to ask a question.")
+
     logger.info(f"[{request_id}] Initiating streaming response...")
     
     return StreamingResponse(
-        # Pass the extra variables into rag.py
-        ask_question_stream(q.query, q.history, current_user.username, q.filename),
+        ask_question_stream(q.query, q.history, current_user.username, q.filename, q.session_id),
         media_type="text/event-stream"
     )
 
@@ -185,7 +221,7 @@ async def ask(
 async def upload_document(
     file: UploadFile = File(...),
     current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db) # <-- NEW: Give this route access to SQLite
+    db: Session = Depends(get_db)
 ):
     os.makedirs("data", exist_ok=True)
     file_path = os.path.join("data", file.filename)
@@ -195,14 +231,11 @@ async def upload_document(
         
     logger.info(f"User '{current_user.username}' successfully uploaded: {file.filename}")
     
-    # THE UPGRADE: Save the record in the SQL database so the user can fetch it later
     new_doc = models.Document(filename=file.filename, owner_id=current_user.id)
     db.add(new_doc)
     db.commit()
     
-    # Process the PDF and add it to the Vector Database
     try:
-        # Pass the file path, the username, and the filename into rag.py
         add_pdf_to_vector_store(file_path, current_user.username, file.filename) 
     except Exception as e:
         logger.error(f"Failed to process PDF: {str(e)}")

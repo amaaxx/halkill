@@ -1,5 +1,6 @@
 from pydantic import BaseModel
-from typing import List, Dict
+from typing import List, Dict, Optional
+from datetime import datetime
 
 # 1. The data React sends us when a user signs up
 class UserCreate(BaseModel):
@@ -23,3 +24,24 @@ class Question(BaseModel):
     query: str
     history: List[Dict[str, str]] = []
     filename: str # <-- NEW: React will send the name of the active document
+    session_id: Optional[int] = None # <-- NEW: Tells the backend which chat to save to
+
+# Schema for an individual message
+class MessageResponse(BaseModel):
+    id: int
+    role: str
+    content: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+# Schema for a chat session (including its history)
+class ChatSessionResponse(BaseModel):
+    id: int
+    title: str
+    document_filename: Optional[str] = None
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
