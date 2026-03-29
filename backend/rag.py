@@ -74,14 +74,16 @@ async def ask_question_stream(query: str, history: list, username: str, filename
         messages = ChatPromptTemplate.from_messages([("system", sys_prompt), ("human", "{input}")]).format_messages(history=formatted_history, input=query)
     elif strict_mode:
         sys_prompt = """You are a strict Research Assistant.
-        RULE: Answer ONLY using the provided Document Context. Cite the source and page number inline.
+        RULE: Answer ONLY using the provided Document Context. 
+        CITATION RULE: Cite ONLY the page number concisely at the end of the sentence using backticks, like this: `[Pg. 45]`. DO NOT repeat the filename.
         RULE: End your response with [CONFIDENCE: HIGH], [CONFIDENCE: MEDIUM], or [CONFIDENCE: LOW].
         If data is missing, say 'I cannot find this information' and end with [CONFIDENCE: LOW].
         Chat History:\n{history}\nDocument Context:\n{context}"""
         messages = ChatPromptTemplate.from_messages([("system", sys_prompt), ("human", "{input}")]).format_messages(history=formatted_history, context=context_text, input=query)
     else:
         sys_prompt = """You are a Hybrid Knowledge Engine.
-        Use the Document Context as your primary source and cite it. If the context is insufficient, use your general knowledge but clearly state you are doing so.
+        Use the Document Context as your primary source. CITATION RULE: Cite ONLY the page number concisely using backticks, like this: `[Pg. 45]`. DO NOT repeat the filename.
+        If the context is insufficient, use your general knowledge but clearly state you are doing so.
         End your response with [CONFIDENCE: HIGH] (if in document), [CONFIDENCE: MEDIUM] (if inferred), or [CONFIDENCE: EXTERNAL] (if using general knowledge).
         Chat History:\n{history}\nDocument Context:\n{context}"""
         messages = ChatPromptTemplate.from_messages([("system", sys_prompt), ("human", "{input}")]).format_messages(history=formatted_history, context=context_text, input=query)

@@ -31,7 +31,7 @@ function ChatBox() {
   }, []);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   async function handleSelectSession(session) {
@@ -114,115 +114,166 @@ function ChatBox() {
       let badge = null;
       let badgeColor = "#4caf50";
 
+      // Strip badges from text and set state
       if (text.includes("[CONFIDENCE: HIGH]")) { badge = "HIGH"; text = text.replace("[CONFIDENCE: HIGH]", ""); }
       else if (text.includes("[CONFIDENCE: MEDIUM]")) { badge = "MEDIUM"; badgeColor = "#ffb74d"; text = text.replace("[CONFIDENCE: MEDIUM]", ""); }
       else if (text.includes("[CONFIDENCE: LOW]")) { badge = "LOW"; badgeColor = "#ef5350"; text = text.replace("[CONFIDENCE: LOW]", ""); }
       else if (text.includes("[CONFIDENCE: EXTERNAL]")) { badge = "EXTERNAL KNOWLEDGE"; badgeColor = "#ab47bc"; text = text.replace("[CONFIDENCE: EXTERNAL]", ""); }
 
+      // Also clean up any legacy long citations if they exist in history
+      text = text.replace(/\[Source: .*?, Page: (\d+)\]/g, "`[Pg. $1]`");
+
       return (
           <>
-             {badge && <span style={{display: 'inline-block', fontSize: '0.7rem', padding: '2px 8px', borderRadius: '12px', backgroundColor: badgeColor, color: 'black', fontWeight: 'bold', marginBottom: '8px'}}>{badge}</span>}
-             <ReactMarkdown
-                components={{
-                    code({node, inline, className, children, ...props}) {
-                        const match = /language-(\w+)/.exec(className || '')
-                        return !inline && match ? (
-                        <SyntaxHighlighter style={vscDarkPlus} language={match[1]} PreTag="div" {...props}>
-                            {String(children).replace(/\n$/, '')}
-                        </SyntaxHighlighter>
-                        ) : ( <code style={{backgroundColor: "#444", padding: "2px 4px", borderRadius: "4px"}} {...props}>{children}</code> )
-                    }
-                }}
-            >{text}</ReactMarkdown>
+             {badge && <div style={{ marginBottom: '10px' }}><span style={{display: 'inline-block', fontSize: '0.65rem', letterSpacing: '0.5px', padding: '4px 10px', borderRadius: '4px', backgroundColor: badgeColor, color: '#121212', fontWeight: '800'}}>{badge}</span></div>}
+             <div className="markdown-body" style={{ color: "#e0e0e0", fontSize: "0.95rem" }}>
+                <ReactMarkdown
+                    components={{
+                        code({node, inline, className, children, ...props}) {
+                            const match = /language-(\w+)/.exec(className || '')
+                            return !inline && match ? (
+                            <div style={{ borderRadius: '8px', overflow: 'hidden', margin: '10px 0' }}>
+                                <SyntaxHighlighter style={vscDarkPlus} language={match[1]} PreTag="div" {...props}>
+                                    {String(children).replace(/\n$/, '')}
+                                </SyntaxHighlighter>
+                            </div>
+                            ) : ( 
+                            <code style={{backgroundColor: "rgba(255,255,255,0.1)", padding: "2px 6px", borderRadius: "6px", color: "#64b5f6", fontSize: "0.85em"}} {...props}>
+                                {children}
+                            </code> 
+                            )
+                        }
+                    }}
+                >{text}</ReactMarkdown>
+             </div>
           </>
       );
   };
   
   return (
-    <div style={{ display: "flex", height: "100vh", backgroundColor: "#121212", color: "white", fontFamily: "sans-serif" }}>
-      <div style={{ width: "260px", backgroundColor: "#1e1e1e", borderRight: "1px solid #333", display: "flex", flexDirection: "column", padding: "20px" }}>
+    <>
+      {/* GLOBAL CSS INJECTION FOR SCROLLBARS AND HOVER STATES */}
+      <style>{`
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #444; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #666; }
+        .sidebar-btn { transition: all 0.2s ease; }
+        .sidebar-btn:hover { background-color: #333 !important; }
+        .markdown-body p { margin-top: 0; margin-bottom: 12px; }
+        .markdown-body ul, .markdown-body ol { margin-top: 0; margin-bottom: 12px; padding-left: 20px; }
+        .markdown-body li { margin-bottom: 6px; }
+      `}</style>
+
+      <div style={{ display: "flex", height: "100vh", backgroundColor: "#0f0f0f", color: "white", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" }}>
         
-        <button onClick={() => handleStartNewChat(null)} style={{ padding: "10px", backgroundColor: "#2d2d2d", color: "white", border: "1px solid #444", borderRadius: "5px", cursor: "pointer", marginBottom: "20px" }}>
-             + New General Chat
-        </button>
+        {/* SIDEBAR */}
+        <div style={{ width: "280px", backgroundColor: "#171717", borderRight: "1px solid #2a2a2a", display: "flex", flexDirection: "column", padding: "24px", boxSizing: "border-box" }}>
+          
+          <button className="sidebar-btn" onClick={() => handleStartNewChat(null)} style={{ padding: "12px", backgroundColor: "#2a2a2a", color: "white", border: "1px solid #3a3a3a", borderRadius: "8px", cursor: "pointer", marginBottom: "24px", fontWeight: "600", fontSize: "0.9rem" }}>
+               + New General Chat
+          </button>
 
-        <h2 style={{ marginTop: 0, marginBottom: "15px", fontSize: "1rem", color: "#aaa", textTransform: "uppercase" }}>Recent Chats</h2>
-        <div style={{ display: "flex", flexDirection: "column", gap: "5px", overflowY: "auto", flex: 1, marginBottom: "20px" }}>
-            {chatSessions.map((session) => (
-                <button
-                    key={session.id} onClick={() => handleSelectSession(session)}
-                    style={{ padding: "10px", textAlign: "left", borderRadius: "6px", cursor: "pointer", border: "none", backgroundColor: activeSession?.id === session.id ? "#2d2d2d" : "transparent", color: activeSession?.id === session.id ? "white" : "#ccc", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                >💬 {session.title}</button>
-            ))}
+          <h2 style={{ margin: "0 0 12px 0", fontSize: "0.75rem", color: "#888", textTransform: "uppercase", letterSpacing: "1px" }}>Recent Chats</h2>
+          <div style={{ display: "flex", flexDirection: "column", gap: "4px", overflowY: "auto", flex: 1, marginBottom: "24px", paddingRight: "4px" }}>
+              {chatSessions.map((session) => (
+                  <button
+                      key={session.id} 
+                      className="sidebar-btn"
+                      onClick={() => handleSelectSession(session)}
+                      style={{ padding: "10px 12px", textAlign: "left", borderRadius: "8px", cursor: "pointer", border: "none", backgroundColor: activeSession?.id === session.id ? "#2a2a2a" : "transparent", color: activeSession?.id === session.id ? "#fff" : "#aaa", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: "0.9rem" }}
+                  >💬 {session.title}</button>
+              ))}
+          </div>
+
+          <h2 style={{ margin: "0 0 12px 0", fontSize: "0.75rem", color: "#888", textTransform: "uppercase", letterSpacing: "1px" }}>My Library</h2>
+          <div style={{ display: "flex", flexDirection: "column", gap: "4px", overflowY: "auto", maxHeight: "30%", paddingRight: "4px" }}>
+              {libraryFiles.map((file, index) => (
+                  <button
+                      key={index} 
+                      className="sidebar-btn"
+                      onClick={() => handleStartNewChat(file)}
+                      style={{ padding: "8px 12px", textAlign: "left", backgroundColor: "transparent", color: "#64b5f6", border: "1px solid rgba(100, 181, 246, 0.3)", borderRadius: "8px", cursor: "pointer", fontSize: "0.85rem", textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}
+                  >📄 {file}</button>
+              ))}
+          </div>
+
+          <div style={{ marginTop: "24px", paddingTop: "24px", borderTop: "1px solid #2a2a2a" }}>
+              <input type="file" id="file-upload" accept=".pdf" style={{ display: "none" }} onChange={handleFileUpload} />
+              <button className="sidebar-btn" onClick={() => document.getElementById("file-upload").click()} disabled={uploading || loading} style={{ width: "100%", padding: "12px", backgroundColor: "#ffffff", color: "#000000", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold", fontSize: "0.9rem" }}>
+                  {uploading ? "Uploading..." : "📎 Upload PDF"}
+              </button>
+          </div>
         </div>
 
-        <h2 style={{ marginTop: 0, marginBottom: "15px", fontSize: "1rem", color: "#aaa", textTransform: "uppercase" }}>My Library</h2>
-        <div style={{ display: "flex", flexDirection: "column", gap: "5px", overflowY: "auto", maxHeight: "30%" }}>
-            {libraryFiles.map((file, index) => (
-                <button
-                    key={index} onClick={() => handleStartNewChat(file)}
-                    style={{ padding: "8px", textAlign: "left", backgroundColor: "transparent", color: "#4caf50", border: "1px solid #4caf50", borderRadius: "6px", cursor: "pointer", fontSize: "0.85rem" }}
-                >+ {file}</button>
-            ))}
-        </div>
+        {/* MAIN CHAT AREA */}
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: "0", maxWidth: "100%" }}>
+          
+          {/* TOP HEADER */}
+          <div style={{ padding: "24px 40px", borderBottom: "1px solid #2a2a2a", display: "flex", justifyContent: "space-between", alignItems: "center", backgroundColor: "#0f0f0f" }}>
+              <div>
+                  <h1 style={{ margin: 0, fontSize: "1.5rem", fontWeight: "700", letterSpacing: "-0.5px" }}>Halkill Engine</h1>
+                  <p style={{ margin: "6px 0 0 0", color: "#888", fontSize: "0.85rem" }}>
+                      Active Document: <strong style={{color: activeSession?.document_filename ? "#64b5f6" : "#aaa", fontWeight: "600"}}>{activeSession?.document_filename || "General (None)"}</strong>
+                  </p>
+              </div>
+              
+              {activeSession?.document_filename && (
+                  <div style={{ display: "flex", alignItems: "center", gap: "12px", backgroundColor: "#171717", padding: "8px 16px", borderRadius: "100px", border: "1px solid #2a2a2a" }}>
+                      <span style={{ fontSize: "0.8rem", fontWeight: "600", color: isStrict ? "#666" : "#fff" }}>Hybrid</span>
+                      <label style={{ position: "relative", display: "inline-block", width: "44px", height: "24px" }}>
+                          <input type="checkbox" checked={isStrict} onChange={() => setIsStrict(!isStrict)} style={{ opacity: 0, width: 0, height: 0 }} />
+                          <span style={{ position: "absolute", cursor: "pointer", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: isStrict ? "#64b5f6" : "#444", borderRadius: "34px", transition: "0.3s" }}>
+                              <span style={{ position: "absolute", height: "18px", width: "18px", left: isStrict ? "23px" : "3px", bottom: "3px", backgroundColor: "white", borderRadius: "50%", transition: "0.3s", boxShadow: "0 2px 4px rgba(0,0,0,0.2)" }}></span>
+                          </span>
+                      </label>
+                      <span style={{ fontSize: "0.8rem", fontWeight: "600", color: isStrict ? "#fff" : "#666" }}>Strict RAG</span>
+                  </div>
+              )}
+          </div>
+    
+          {/* MESSAGES */}
+          <div style={{ flex: 1, overflowY: "auto", padding: "40px", display: "flex", flexDirection: "column", gap: "24px", maxWidth: "900px", width: "100%", margin: "0 auto" }}>
+              {messages.map((msg, index) => (
+              <div key={index} style={{ display: "flex", justifyContent: msg.role === "user" ? "flex-end" : "flex-start" }}>
+                  <div style={{ 
+                      padding: "16px 20px", 
+                      borderRadius: msg.role === "user" ? "20px 20px 4px 20px" : "20px 20px 20px 4px", 
+                      backgroundColor: msg.role === "user" ? "#292929" : "transparent", 
+                      border: msg.role === "user" ? "none" : "1px solid #2a2a2a",
+                      color: "white", 
+                      maxWidth: "85%", 
+                      lineHeight: "1.6", 
+                      textAlign: "left" 
+                  }}>
+                      {msg.role === "user" ? msg.content : renderMessageContent(msg.content)}
+                  </div>
+              </div>
+              ))}
+              <div ref={messagesEndRef} />
+          </div>
+          
+          {/* INPUT BAR */}
+          <div style={{ padding: "20px 40px 40px 40px", maxWidth: "900px", width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
+              <div style={{ display: "flex", gap: "10px", padding: "8px", backgroundColor: "#171717", borderRadius: "16px", border: "1px solid #2a2a2a", boxShadow: "0 4px 20px rgba(0,0,0,0.2)" }}>
+                  <input
+                      value={question} onChange={(e) => setQuestion(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleAsk(); }} 
+                      placeholder={activeSession ? `Ask a question...` : "Select a chat to begin..."}
+                      disabled={!activeSession}
+                      style={{ flexGrow: 1, padding: "12px 16px", borderRadius: "12px", border: "none", backgroundColor: "transparent", color: "white", outline: "none", fontSize: "1rem" }}
+                  />
+                  <button
+                      onClick={handleAsk} disabled={loading || uploading || !activeSession}
+                      style={{ padding: "12px 24px", backgroundColor: question.trim() ? "#ffffff" : "#333", color: question.trim() ? "#000000" : "#888", border: "none", borderRadius: "10px", cursor: question.trim() ? "pointer" : "default", fontWeight: "bold", transition: "0.2s" }}
+                  >
+                      {loading ? "..." : "Send"}
+                  </button>
+              </div>
+          </div>
 
-        <div style={{ marginTop: "20px", paddingTop: "20px", borderTop: "1px solid #333" }}>
-            <input type="file" id="file-upload" accept=".pdf" style={{ display: "none" }} onChange={handleFileUpload} />
-            <button onClick={() => document.getElementById("file-upload").click()} disabled={uploading || loading} style={{ width: "100%", padding: "10px", backgroundColor: "#007bff", color: "white", border: "none", borderRadius: "5px", cursor: "pointer", fontWeight: "bold" }}>
-                {uploading ? "Uploading..." : "📎 Upload PDF"}
-            </button>
-        </div>
+        </div> 
       </div>
-
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: "20px 40px", maxWidth: "900px", margin: "0 auto" }}>
-        <div style={{ paddingBottom: "20px", borderBottom: "1px solid #333", marginBottom: "20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div>
-                <h1 style={{ margin: 0 }}>Halkill Engine</h1>
-                <p style={{ margin: "5px 0 0 0", color: "#888", fontSize: "0.9rem" }}>
-                    Active Document: <strong style={{color: activeSession?.document_filename ? "#4caf50" : "#007bff"}}>{activeSession?.document_filename || "General (None)"}</strong>
-                </p>
-            </div>
-            {activeSession?.document_filename && (
-                <div style={{ display: "flex", alignItems: "center", gap: "10px", backgroundColor: "#1e1e1e", padding: "5px 10px", borderRadius: "20px" }}>
-                    <span style={{ fontSize: "0.8rem", color: isStrict ? "#aaa" : "white" }}>Hybrid</span>
-                    <label style={{ position: "relative", display: "inline-block", width: "40px", height: "20px" }}>
-                        <input type="checkbox" checked={isStrict} onChange={() => setIsStrict(!isStrict)} style={{ opacity: 0, width: 0, height: 0 }} />
-                        <span style={{ position: "absolute", cursor: "pointer", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: isStrict ? "#4caf50" : "#555", borderRadius: "34px", transition: "0.4s" }}>
-                            <span style={{ position: "absolute", height: "14px", width: "14px", left: isStrict ? "22px" : "3px", bottom: "3px", backgroundColor: "white", borderRadius: "50%", transition: "0.4s" }}></span>
-                        </span>
-                    </label>
-                    <span style={{ fontSize: "0.8rem", color: isStrict ? "white" : "#aaa" }}>Strict RAG</span>
-                </div>
-            )}
-        </div>
-  
-        <div style={{ flex: 1, overflowY: "auto", paddingRight: "10px", display: "flex", flexDirection: "column", gap: "15px" }}>
-            {messages.map((msg, index) => (
-            <div key={index} style={{ textAlign: msg.role === "user" ? "right" : "left" }}>
-                <div style={{ display: "inline-block", padding: "12px 18px", borderRadius: msg.role === "user" ? "18px 18px 4px 18px" : "18px 18px 18px 4px", backgroundColor: msg.role === "user" ? "#007bff" : "#2d2d2d", color: "white", maxWidth: "85%", boxShadow: "0 2px 5px rgba(0,0,0,0.2)", lineHeight: "1.6", textAlign: "left" }}>
-                    {msg.role === "user" ? msg.content : renderMessageContent(msg.content)}
-                </div>
-            </div>
-            ))}
-            <div ref={messagesEndRef} />
-        </div>
-        
-        <div style={{ display: "flex", gap: "10px", marginTop: "20px", padding: "10px", backgroundColor: "#1e1e1e", borderRadius: "8px" }}>
-            <input
-                value={question} onChange={(e) => setQuestion(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleAsk(); }} 
-                placeholder={activeSession ? `Ask a question...` : "Select a chat to begin..."}
-                disabled={!activeSession}
-                style={{ flexGrow: 1, padding: "12px", borderRadius: "5px", border: "none", backgroundColor: "transparent", color: "white", outline: "none", fontSize: "1rem" }}
-            />
-            <button
-                onClick={handleAsk} disabled={loading || uploading || !activeSession}
-                style={{ padding: "10px 20px", backgroundColor: "#007bff", color: "white", border: "none", borderRadius: "5px", cursor: "pointer", fontWeight: "bold", opacity: (!activeSession || loading) ? 0.5 : 1 }}
-            >
-                {loading ? "..." : "Send"}
-            </button>
-        </div>
-      </div> 
-    </div>
+    </>
   );
 }
 
