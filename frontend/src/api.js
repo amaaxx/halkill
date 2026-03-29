@@ -1,5 +1,6 @@
 // Function to handle streaming responses
-export async function askQuestionStream(question, history, onChunk, filename, sessionId) {
+// UPDATED: Added isStrict parameter and strict_mode to the body
+export async function askQuestionStream(question, history, onChunk, filename, sessionId, isStrict) {
   const token = localStorage.getItem('token');
 
   const response = await fetch("http://127.0.0.1:8000/ask", {
@@ -8,12 +9,12 @@ export async function askQuestionStream(question, history, onChunk, filename, se
       "Content-Type": "application/json",
       "Authorization": `Bearer ${token}` 
     },
-    // We now send the session_id so the backend saves it in the right folder!
     body: JSON.stringify({ 
         query: question, 
         history: history, 
-        filename: filename,
-        session_id: sessionId
+        filename: filename || null, // Fallback to null for General Chats
+        session_id: sessionId,
+        strict_mode: isStrict // Sends the toggle state to the backend
     }),
   });
 
@@ -61,8 +62,9 @@ export async function fetchUserLibrary() {
   return await response.json(); 
 }
 
-// NEW: Create a new chat session for a specific file
-export async function createChatSession(filename) {
+// NEW: Create a new chat session for a specific file (or General Chat)
+// UPDATED: Added filename = null default parameter
+export async function createChatSession(filename = null) {
   const token = localStorage.getItem('token');
   const response = await fetch("http://127.0.0.1:8000/chats", {
     method: "POST",

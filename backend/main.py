@@ -7,7 +7,6 @@ from pydantic import BaseModel
 from typing import List, Dict, Any
 import uuid
 
-# Import your local Layer 4 files
 from database import engine, get_db
 import models, schemas, security
 from rag import ask_question_stream, add_pdf_to_vector_store
@@ -18,7 +17,6 @@ from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from jose import JWTError, jwt
 
-# This tells SQLAlchemy to create all tables in Postgres if they don't exist
 models.Base.metadata.create_all(bind=engine)
 
 logger = get_logger(__name__)
@@ -33,7 +31,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# This tells FastAPI where the login URL is to get a token
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
@@ -43,7 +40,6 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
-        # Decode the JWT token using the Secret Key from security.py
         payload = jwt.decode(token, security.SECRET_KEY, algorithms=[security.ALGORITHM])
         username: str = payload.get("sub")
         if username is None:
@@ -56,23 +52,18 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
         raise credentials_exception
     return user
 
-
 @app.middleware("http")
 async def add_request_id(request: Request, call_next):
     request_id = str(uuid.uuid4())
     request.state.request_id = request_id
-
     response = await call_next(request)
     response.headers["X-Request-ID"] = request_id
-
     return response
-
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     request_id = getattr(request.state, "request_id", "unknown")
     logger.error(f"[{request_id}] Unhandled error", exc_info=True)
-
     return JSONResponse(
         status_code=500,
         content={
@@ -84,10 +75,6 @@ async def global_exception_handler(request: Request, exc: Exception):
             }
         },
     )
-
-# ==========================================
-# AUTHENTICATION ROUTES (The Vault)
-# ==========================================
 
 @app.post("/register", response_model=schemas.UserResponse)
 def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
@@ -109,7 +96,6 @@ def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
     
     return new_user
 
-
 @app.post("/token")
 def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = db.query(models.User).filter(models.User.username == form_data.username).first()
@@ -124,15 +110,9 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
     access_token = security.create_access_token(data={"sub": user.username})
     return {"access_token": access_token, "token_type": "bearer"}
 
-
 @app.get("/")
 def home():
     return {"status": "Academic Engine is Active"}
-
-
-# ==========================================
-# DOCUMENT & CHAT ROUTES (The Library & Memory)
-# ==========================================
 
 @app.get("/documents")
 def get_user_documents(
@@ -143,19 +123,15 @@ def get_user_documents(
     unique_files = list(set([doc.filename for doc in docs]))
     return {"files": unique_files}
 
-
-class ChatCreate(BaseModel):
-    filename: str
-
 @app.post("/chats", response_model=schemas.ChatSessionResponse)
 def create_chat_session(
-    chat_req: ChatCreate,
+    chat_req: schemas.ChatCreate,
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    # Create a new "Folder" for this conversation
+    title = f"Chat about {chat_req.filename}" if chat_req.filename else "General Chat"
     new_chat = models.ChatSession(
-        title=f"Chat about {chat_req.filename}",
+        title=title,
         document_filename=chat_req.filename,
         owner_id=current_user.id
     )
@@ -169,7 +145,6 @@ def get_user_chats(
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    # Fetch all chat sessions for the sidebar, newest first
     return db.query(models.ChatSession)\
         .filter(models.ChatSession.owner_id == current_user.id)\
         .order_by(models.ChatSession.created_at.desc())\
@@ -181,7 +156,6 @@ def get_chat_history(
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    # Verify the user actually owns this chat
     session = db.query(models.ChatSession).filter(
         models.ChatSession.id == session_id, 
         models.ChatSession.owner_id == current_user.id
@@ -190,30 +164,25 @@ def get_chat_history(
     if not session:
         raise HTTPException(status_code=404, detail="Chat not found")
         
-    # Return all messages in chronological order
     return db.query(models.ChatMessage)\
         .filter(models.ChatMessage.session_id == session_id)\
         .order_by(models.ChatMessage.created_at.asc())\
         .all()
 
-
 @app.post("/ask")
 async def ask(
     q: schemas.Question, 
     request: Request, 
-    current_user: models.User = Depends(get_current_user) # The Vault Lock
+    current_user: models.User = Depends(get_current_user)
 ):
     request_id = getattr(request.state, "request_id", "UNKNOWN")
     logger.info(f"[{request_id}] User '{current_user.username}' is querying '{q.filename}' in session {q.session_id}")
     
-    # We must have a session ID to save the memory!
     if not q.session_id:
         raise HTTPException(status_code=400, detail="session_id is required to ask a question.")
 
-    logger.info(f"[{request_id}] Initiating streaming response...")
-    
     return StreamingResponse(
-        ask_question_stream(q.query, q.history, current_user.username, q.filename, q.session_id),
+        ask_question_stream(q.query, q.history, current_user.username, q.filename, q.session_id, q.strict_mode),
         media_type="text/event-stream"
     )
 
