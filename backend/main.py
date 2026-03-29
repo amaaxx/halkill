@@ -9,7 +9,7 @@ import uuid
 
 from database import engine, get_db
 import models, schemas, security
-from rag import ask_question_stream, add_pdf_to_vector_store
+from rag import ask_question_stream, add_document_to_vector_store
 from logger import get_logger
 
 from fastapi import Depends, status
@@ -182,7 +182,8 @@ async def ask(
         raise HTTPException(status_code=400, detail="session_id is required to ask a question.")
 
     return StreamingResponse(
-        ask_question_stream(q.query, q.history, current_user.username, q.filename, q.session_id, q.strict_mode),
+        # Notice we are passing q.image_data here!
+        ask_question_stream(q.query, q.history, current_user.username, q.filename, q.session_id, q.strict_mode, q.image_data),
         media_type="text/event-stream"
     )
 
@@ -205,10 +206,10 @@ async def upload_document(
     db.commit()
     
     try:
-        add_pdf_to_vector_store(file_path, current_user.username, file.filename) 
+        add_document_to_vector_store(file_path, current_user.username, file.filename) 
     except Exception as e:
-        logger.error(f"Failed to process PDF: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to extract text from PDF: {str(e)}")
+        logger.error(f"Failed to process document: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to extract text: {str(e)}")
     
     return {
         "success": True, 

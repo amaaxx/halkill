@@ -26,6 +26,7 @@ class Question(BaseModel):
     filename: Optional[str] = None 
     session_id: Optional[int] = None 
     strict_mode: bool = True
+    image_data: Optional[str] = None 
 
 class MessageResponse(BaseModel):
     id: int
