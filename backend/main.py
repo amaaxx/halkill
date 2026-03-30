@@ -186,6 +186,46 @@ async def ask(
         ask_question_stream(q.query, q.history, current_user.username, q.filename, q.session_id, q.strict_mode, q.image_data),
         media_type="text/event-stream"
     )
+# Add this small schema above the routes
+class ChatRename(BaseModel):
+    title: str
+
+@app.put("/chats/{session_id}")
+def rename_chat(
+    session_id: int, 
+    req: ChatRename, 
+    current_user: models.User = Depends(get_current_user), 
+    db: Session = Depends(get_db)
+):
+    session = db.query(models.ChatSession).filter(models.ChatSession.id == session_id, models.ChatSession.owner_id == current_user.id).first()
+    if not session: raise HTTPException(status_code=404)
+    session.title = req.title
+    db.commit()
+    return {"success": True, "title": session.title}
+
+@app.delete("/chats/{session_id}")
+def delete_chat(
+    session_id: int, 
+    current_user: models.User = Depends(get_current_user), 
+    db: Session = Depends(get_db)
+):
+    session = db.query(models.ChatSession).filter(models.ChatSession.id == session_id, models.ChatSession.owner_id == current_user.id).first()
+    if not session: raise HTTPException(status_code=404)
+    db.delete(session)
+    db.commit()
+    return {"success": True}
+
+@app.delete("/documents/{filename}")
+def delete_document(
+    filename: str, 
+    current_user: models.User = Depends(get_current_user), 
+    db: Session = Depends(get_db)
+):
+    docs = db.query(models.Document).filter(models.Document.filename == filename, models.Document.owner_id == current_user.id).all()
+    for doc in docs:
+        db.delete(doc)
+    db.commit()
+    return {"success": True}
 
 @app.post("/upload")
 async def upload_document(

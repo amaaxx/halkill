@@ -1,6 +1,4 @@
-// Function to handle streaming responses
-// UPDATED: Added isStrict parameter and strict_mode to the body
-export async function askQuestionStream(question, history, onChunk, filename, sessionId, isStrict) {
+export async function askQuestionStream(question, history, onChunk, filename, sessionId, isStrict, imageData) {
   const token = localStorage.getItem('token');
 
   const response = await fetch("http://127.0.0.1:8000/ask", {
@@ -12,9 +10,10 @@ export async function askQuestionStream(question, history, onChunk, filename, se
     body: JSON.stringify({ 
         query: question, 
         history: history, 
-        filename: filename || null, // Fallback to null for General Chats
+        filename: filename || null, 
         session_id: sessionId,
-        strict_mode: isStrict // Sends the toggle state to the backend
+        strict_mode: isStrict,
+        image_data: imageData || null // NEW: Send image to backend
     }),
   });
 
@@ -34,7 +33,6 @@ export async function askQuestionStream(question, history, onChunk, filename, se
   }
 }
 
-// Upload a document
 export async function uploadDocument(file) {
   const token = localStorage.getItem('token');
   const formData = new FormData();
@@ -51,7 +49,6 @@ export async function uploadDocument(file) {
   return data;
 }
 
-// Fetch user's uploaded files
 export async function fetchUserLibrary() {
   const token = localStorage.getItem('token');
   const response = await fetch("http://127.0.0.1:8000/documents", {
@@ -62,8 +59,6 @@ export async function fetchUserLibrary() {
   return await response.json(); 
 }
 
-// NEW: Create a new chat session for a specific file (or General Chat)
-// UPDATED: Added filename = null default parameter
 export async function createChatSession(filename = null) {
   const token = localStorage.getItem('token');
   const response = await fetch("http://127.0.0.1:8000/chats", {
@@ -78,7 +73,6 @@ export async function createChatSession(filename = null) {
   return await response.json();
 }
 
-// NEW: Fetch all previous chat sessions
 export async function fetchUserChats() {
   const token = localStorage.getItem('token');
   const response = await fetch("http://127.0.0.1:8000/chats", {
@@ -89,7 +83,6 @@ export async function fetchUserChats() {
   return await response.json();
 }
 
-// NEW: Fetch the message history of a specific chat
 export async function fetchChatHistory(sessionId) {
   const token = localStorage.getItem('token');
   const response = await fetch(`http://127.0.0.1:8000/chats/${sessionId}/messages`, {
@@ -98,4 +91,31 @@ export async function fetchChatHistory(sessionId) {
   });
   if (!response.ok) throw new Error("Failed to load history");
   return await response.json();
+}
+export async function renameChatSession(sessionId, newTitle) {
+  const token = localStorage.getItem('token');
+  const res = await fetch(`http://127.0.0.1:8000/chats/${sessionId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+    body: JSON.stringify({ title: newTitle })
+  });
+  if (!res.ok) throw new Error("Failed to rename chat");
+}
+
+export async function deleteChatSession(sessionId) {
+  const token = localStorage.getItem('token');
+  const res = await fetch(`http://127.0.0.1:8000/chats/${sessionId}`, {
+    method: "DELETE",
+    headers: { "Authorization": `Bearer ${token}` }
+  });
+  if (!res.ok) throw new Error("Failed to delete chat");
+}
+
+export async function deleteDocument(filename) {
+  const token = localStorage.getItem('token');
+  const res = await fetch(`http://127.0.0.1:8000/documents/${filename}`, {
+    method: "DELETE",
+    headers: { "Authorization": `Bearer ${token}` }
+  });
+  if (!res.ok) throw new Error("Failed to delete document");
 }

@@ -24,11 +24,11 @@ if not GOOGLE_API_KEY:
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(BASE_DIR, "chroma_db")
 
-# 1. SWITCHING TO FLASH-LITE
+# 1. LLM SETUP
 llm = ChatGoogleGenerativeAI(
     model="gemini-2.5-flash-lite", 
     google_api_key=GOOGLE_API_KEY,
-    temperature=0.2, # Lower temperature for better factual accuracy
+    temperature=0.2, 
     max_tokens=4096
 )
 
@@ -63,14 +63,14 @@ async def ask_question_stream(query: str, history: list, username: str, filename
         ext = os.path.splitext(filename)[1].lower()
         is_tabular = ext in [".xlsx", ".xls", ".csv"]
         
-        # DYNAMIC RETRIEVER: Similarity for Excel, MMR for PDFs
+        # DYNAMIC RETRIEVER: Optimized K-values to balance tokens and accuracy
         search_type = "similarity" if is_tabular else "mmr"
         search_kwargs = {
-            "k": 15, # Balanced token limit
+            "k": 20 if is_tabular else 8, # 100 rows for Excel, ~12k chars for PDFs
             "filter": { "$and": [ {"username": username}, {"source": filename} ] }
         }
         if not is_tabular:
-            search_kwargs["fetch_k"] = 50
+            search_kwargs["fetch_k"] = 40
             search_kwargs["lambda_mult"] = 0.3
 
         dynamic_retriever = vector_store.as_retriever(search_type=search_type, search_kwargs=search_kwargs)
@@ -78,7 +78,7 @@ async def ask_question_stream(query: str, history: list, username: str, filename
         
         context_text = "\n\n".join([f"--- [Pg. {d.metadata.get('page', 'N/A')}] ---\n{d.page_content}" for d in docs])
 
-    # 2. SHORT-FORM PROMPT (Token Optimized)
+    # 2. SHORT-FORM PROMPT
     if not filename:
         sys_p = "Helpful AI. History: {history}"
     elif strict_mode:
@@ -88,7 +88,7 @@ async def ask_question_stream(query: str, history: list, username: str, filename
 
     formatted_sys = sys_p.format(history=formatted_history, context=context_text)
 
-    # 3. RETRY SHIELD (Exponential Backoff)
+    # 3. RETRY SHIELD 
     messages = [SystemMessage(content=formatted_sys)]
     h_content = [{"type": "text", "text": query}]
     if image_data:
@@ -111,7 +111,7 @@ async def ask_question_stream(query: str, history: list, username: str, filename
                 time.sleep(wait_time)
                 continue
             else:
-                logger.error(f"Brain Error: {str(e)}")
+                logger.error(f"Engine Error: {str(e)}")
                 yield f"System error: {str(e)}"
                 break
 
@@ -139,13 +139,12 @@ def add_document_to_vector_store(file_path: str, username: str, filename: str):
     elif ext in [".xlsx", ".xls", ".csv"]:
         is_tabular = True
         df = pd.read_csv(file_path) if ext == ".csv" else pd.read_excel(file_path)
-        df = df.fillna("") 
         
         current_chunk = ""
         start_row = 2
-        # 5 ROWS PER CHUNK: Maximum search accuracy for employee names
+        # TOKEN OPTIMIZATION: pd.notna(val) strips out useless "nan" strings 
         for index, row in df.iterrows():
-            row_text = " | ".join([f"{col}: {val}" for col, val in row.items() if str(val).strip() != ""])
+            row_text = " | ".join([f"{col}: {val}" for col, val in row.items() if pd.notna(val) and str(val).strip() != ""])
             current_chunk += f"[Row {index+2}] {row_text}\n"
             if (index + 1) % 5 == 0:
                 docs.append(Document(page_content=current_chunk, metadata={"source": filename, "page": f"Rows {start_row}-{index+2}"}))
@@ -167,4 +166,4 @@ def add_document_to_vector_store(file_path: str, username: str, filename: str):
     batch_size = 100 
     for i in range(0, len(chunks), batch_size):
         vector_store.add_documents(chunks[i:i+batch_size])
-        time.sleep(0.2) # Breather for ChromaDB
+        time.sleep(0.2)
