@@ -6,11 +6,12 @@ from langchain_community.document_loaders import PyMuPDFLoader, TextLoader, CSVL
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_chroma import Chroma
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage
-from logger import get_logger
+from supabase.client import create_client
+from langchain_community.vectorstores import SupabaseVectorStore
 
+from logger import get_logger
 from database import SessionLocal
 import models
 
@@ -18,13 +19,15 @@ logger = get_logger(__name__)
 load_dotenv()
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-if not GOOGLE_API_KEY:
-    raise ValueError("GOOGLE_API_KEY is not set properly.")
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(BASE_DIR, "chroma_db")
+if not all([GOOGLE_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_KEY]):
+    raise ValueError("Missing critical environment variables.")
 
-# 1. LLM SETUP
+# Initialize Supabase Client
+supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+
 llm = ChatGoogleGenerativeAI(
     model="gemini-2.5-flash-lite", 
     google_api_key=GOOGLE_API_KEY,
@@ -36,13 +39,15 @@ embedding_function = HuggingFaceEmbeddings(
     model_name="sentence-transformers/all-MiniLM-L6-v2"
 )
 
-vector_store = Chroma(
-    persist_directory=DB_PATH,
-    embedding_function=embedding_function
+# CLOUD VECTOR STORE
+vector_store = SupabaseVectorStore(
+    client=supabase,
+    embedding=embedding_function,
+    table_name="langchain_vecs", # <-- CHANGED THIS
+    query_name="match_vecs",     # <-- CHANGED THIS
 )
 
 async def ask_question_stream(query: str, history: list, username: str, filename: str, session_id: int, strict_mode: bool, image_data: str = None):
-    # Log user message
     db_content = f"![Image]({image_data})\n\n{query}" if image_data else query
     db = SessionLocal()
     try:
@@ -52,7 +57,6 @@ async def ask_question_stream(query: str, history: list, username: str, filename
     finally:
         db.close()
 
-    # Shorten history to save tokens
     formatted_history = ""
     for msg in history[-3:]: 
         speaker = "Human" if msg["role"] == "user" else "AI"
@@ -63,22 +67,37 @@ async def ask_question_stream(query: str, history: list, username: str, filename
         ext = os.path.splitext(filename)[1].lower()
         is_tabular = ext in [".xlsx", ".xls", ".csv"]
         
-        # DYNAMIC RETRIEVER: Optimized K-values to balance tokens and accuracy
-        search_type = "similarity" if is_tabular else "mmr"
-        search_kwargs = {
-            "k": 20 if is_tabular else 8, # 100 rows for Excel, ~12k chars for PDFs
-            "filter": { "$and": [ {"username": username}, {"source": filename} ] }
-        }
-        if not is_tabular:
-            search_kwargs["fetch_k"] = 40
-            search_kwargs["lambda_mult"] = 0.3
-
-        dynamic_retriever = vector_store.as_retriever(search_type=search_type, search_kwargs=search_kwargs)
-        docs = await dynamic_retriever.ainvoke(query)
+        filter_dict = {"username": username, "source": filename}
+        k_val = 20 if is_tabular else 8
         
-        context_text = "\n\n".join([f"--- [Pg. {d.metadata.get('page', 'N/A')}] ---\n{d.page_content}" for d in docs])
+        # ---------------------------------------------------------
+        # THE CUSTOM RETRIEVER (Bypassing LangChain's broken wrapper)
+        # ---------------------------------------------------------
+        try:
+            # 1. Turn the user's question into a math vector
+            query_embedding = embedding_function.embed_query(query)
+            
+            # 2. Call your raw SQL function directly inside Supabase
+            response = supabase.rpc("match_vecs", {
+                "query_embedding": query_embedding,
+                "match_threshold": 0.0, 
+                "match_count": k_val,
+                "filter": filter_dict
+            }).execute()
+            
+            # 3. Format the returned rows into our Prompt Context
+            context_entries = []
+            for row in response.data:
+                page = row.get("metadata", {}).get("page", "N/A")
+                content = row.get("content", "")
+                context_entries.append(f"--- [Pg. {page}] ---\n{content}")
+                
+            context_text = "\n\n".join(context_entries)
+            
+        except Exception as e:
+            logger.error(f"Custom Retrieval Error: {str(e)}")
+            context_text = "I could not retrieve the document data due to a database error."
 
-    # 2. SHORT-FORM PROMPT
     if not filename:
         sys_p = "Helpful AI. History: {history}"
     elif strict_mode:
@@ -88,7 +107,6 @@ async def ask_question_stream(query: str, history: list, username: str, filename
 
     formatted_sys = sys_p.format(history=formatted_history, context=context_text)
 
-    # 3. RETRY SHIELD 
     messages = [SystemMessage(content=formatted_sys)]
     h_content = [{"type": "text", "text": query}]
     if image_data:
@@ -103,7 +121,7 @@ async def ask_question_stream(query: str, history: list, username: str, filename
                 if chunk.content:
                     full_ai_response += chunk.content
                     yield chunk.content
-            break # Success!
+            break
         except Exception as e:
             if "429" in str(e) and attempt < max_retries - 1:
                 wait_time = (2 ** attempt) + 1
@@ -115,7 +133,6 @@ async def ask_question_stream(query: str, history: list, username: str, filename
                 yield f"System error: {str(e)}"
                 break
 
-    # Save AI Response
     db = SessionLocal()
     try:
         ai_msg = models.ChatMessage(session_id=session_id, role="ai", content=full_ai_response)
@@ -142,7 +159,6 @@ def add_document_to_vector_store(file_path: str, username: str, filename: str):
         
         current_chunk = ""
         start_row = 2
-        # TOKEN OPTIMIZATION: pd.notna(val) strips out useless "nan" strings 
         for index, row in df.iterrows():
             row_text = " | ".join([f"{col}: {val}" for col, val in row.items() if pd.notna(val) and str(val).strip() != ""])
             current_chunk += f"[Row {index+2}] {row_text}\n"
@@ -162,7 +178,7 @@ def add_document_to_vector_store(file_path: str, username: str, filename: str):
         chunk.metadata["username"] = username
         chunk.metadata["source"] = filename
 
-    # BATCH INSERTION WITH BREATHER
+    # BATCH INSERTION TO CLOUD DB
     batch_size = 100 
     for i in range(0, len(chunks), batch_size):
         vector_store.add_documents(chunks[i:i+batch_size])

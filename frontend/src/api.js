@@ -1,19 +1,17 @@
+// Automatically switches between Localhost and your Render Production URL
+const API_URL = process.env.REACT_APP_API_URL || "http://127.0.0.1:8000";
+
 export async function askQuestionStream(question, history, onChunk, filename, sessionId, isStrict, imageData) {
   const token = localStorage.getItem('token');
-
-  const response = await fetch("http://127.0.0.1:8000/ask", {
+  const response = await fetch(`${API_URL}/ask`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "Authorization": `Bearer ${token}` 
     },
     body: JSON.stringify({ 
-        query: question, 
-        history: history, 
-        filename: filename || null, 
-        session_id: sessionId,
-        strict_mode: isStrict,
-        image_data: imageData || null // NEW: Send image to backend
+        query: question, history: history, filename: filename || null, 
+        session_id: sessionId, strict_mode: isStrict, image_data: imageData || null 
     }),
   });
 
@@ -38,7 +36,7 @@ export async function uploadDocument(file) {
   const formData = new FormData();
   formData.append("file", file);
 
-  const response = await fetch("http://127.0.0.1:8000/upload", {
+  const response = await fetch(`${API_URL}/upload`, {
     method: "POST",
     headers: { "Authorization": `Bearer ${token}` },
     body: formData,
@@ -51,7 +49,7 @@ export async function uploadDocument(file) {
 
 export async function fetchUserLibrary() {
   const token = localStorage.getItem('token');
-  const response = await fetch("http://127.0.0.1:8000/documents", {
+  const response = await fetch(`${API_URL}/documents`, {
     method: "GET",
     headers: { "Authorization": `Bearer ${token}` }
   });
@@ -61,12 +59,9 @@ export async function fetchUserLibrary() {
 
 export async function createChatSession(filename = null) {
   const token = localStorage.getItem('token');
-  const response = await fetch("http://127.0.0.1:8000/chats", {
+  const response = await fetch(`${API_URL}/chats`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${token}`
-    },
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
     body: JSON.stringify({ filename })
   });
   if (!response.ok) throw new Error("Failed to create chat");
@@ -75,7 +70,7 @@ export async function createChatSession(filename = null) {
 
 export async function fetchUserChats() {
   const token = localStorage.getItem('token');
-  const response = await fetch("http://127.0.0.1:8000/chats", {
+  const response = await fetch(`${API_URL}/chats`, {
     method: "GET",
     headers: { "Authorization": `Bearer ${token}` }
   });
@@ -85,16 +80,17 @@ export async function fetchUserChats() {
 
 export async function fetchChatHistory(sessionId) {
   const token = localStorage.getItem('token');
-  const response = await fetch(`http://127.0.0.1:8000/chats/${sessionId}/messages`, {
+  const response = await fetch(`${API_URL}/chats/${sessionId}/messages`, {
     method: "GET",
     headers: { "Authorization": `Bearer ${token}` }
   });
   if (!response.ok) throw new Error("Failed to load history");
   return await response.json();
 }
+
 export async function renameChatSession(sessionId, newTitle) {
   const token = localStorage.getItem('token');
-  const res = await fetch(`http://127.0.0.1:8000/chats/${sessionId}`, {
+  const res = await fetch(`${API_URL}/chats/${sessionId}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
     body: JSON.stringify({ title: newTitle })
@@ -104,7 +100,7 @@ export async function renameChatSession(sessionId, newTitle) {
 
 export async function deleteChatSession(sessionId) {
   const token = localStorage.getItem('token');
-  const res = await fetch(`http://127.0.0.1:8000/chats/${sessionId}`, {
+  const res = await fetch(`${API_URL}/chats/${sessionId}`, {
     method: "DELETE",
     headers: { "Authorization": `Bearer ${token}` }
   });
@@ -113,7 +109,7 @@ export async function deleteChatSession(sessionId) {
 
 export async function deleteDocument(filename) {
   const token = localStorage.getItem('token');
-  const res = await fetch(`http://127.0.0.1:8000/documents/${filename}`, {
+  const res = await fetch(`${API_URL}/documents/${filename}`, {
     method: "DELETE",
     headers: { "Authorization": `Bearer ${token}` }
   });

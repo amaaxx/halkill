@@ -6,19 +6,19 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Fetch the Postgres URL from your .env file
 SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL")
 
-# Connect to PostgreSQL
-engine = create_engine(SQLALCHEMY_DATABASE_URL)
+# Updated for Supabase Connection Pooling
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL,
+    pool_size=10, 
+    max_overflow=20,
+    pool_pre_ping=True
+)
 
-# Create a session factory for our routes to use
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-# Base class for our database models (Users, etc.)
 Base = declarative_base()
 
-# Dependency to get the database session in our FastAPI routes
 def get_db():
     db = SessionLocal()
     try:
