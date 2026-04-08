@@ -23,9 +23,15 @@ logger = get_logger(__name__)
 
 app = FastAPI()
 
+origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "https://halkill.vercel.app"  
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Allows Vercel to connect without CORS errors
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
