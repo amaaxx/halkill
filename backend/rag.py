@@ -35,17 +35,14 @@ llm = ChatGoogleGenerativeAI(
     max_tokens=4096
 )
 
-embedding_function = HuggingFaceEmbeddings(
-    model_name="sentence-transformers/all-MiniLM-L6-v2"
-)
+GLOBAL_EMBEDDING = None
 
-# CLOUD VECTOR STORE
-vector_store = SupabaseVectorStore(
-    client=supabase,
-    embedding=embedding_function,
-    table_name="langchain_vecs", # <-- CHANGED THIS
-    query_name="match_vecs",     # <-- CHANGED THIS
-)
+def get_embeddings():
+    global GLOBAL_EMBEDDING
+    if GLOBAL_EMBEDDING is None:
+        logger.info("Lazy loading AI Embedding Model...")
+        GLOBAL_EMBEDDING = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+    return GLOBAL_EMBEDDING
 
 async def ask_question_stream(query: str, history: list, username: str, filename: str, session_id: int, strict_mode: bool, image_data: str = None):
     db_content = f"![Image]({image_data})\n\n{query}" if image_data else query
@@ -75,7 +72,7 @@ async def ask_question_stream(query: str, history: list, username: str, filename
         # ---------------------------------------------------------
         try:
             # 1. Turn the user's question into a math vector
-            query_embedding = embedding_function.embed_query(query)
+            query_embedding = get_embeddings().embed_query(query)
             
             # 2. Call your raw SQL function directly inside Supabase
             response = supabase.rpc("match_vecs", {
@@ -180,6 +177,15 @@ def add_document_to_vector_store(file_path: str, username: str, filename: str):
 
     # BATCH INSERTION TO CLOUD DB
     batch_size = 100 
+    
+    # Initialize connection right before uploading
+    vector_store = SupabaseVectorStore(
+        client=supabase,
+        embedding=get_embeddings(),
+        table_name="langchain_vecs",
+        query_name="match_vecs",
+    )
+    
     for i in range(0, len(chunks), batch_size):
         vector_store.add_documents(chunks[i:i+batch_size])
         time.sleep(0.2)
