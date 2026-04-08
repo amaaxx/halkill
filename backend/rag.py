@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from langchain_community.document_loaders import PyMuPDFLoader, TextLoader, CSVLoader
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_google_genai import GoogleGenerativeAIEmbeddings 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage
 from supabase.client import create_client
@@ -40,8 +40,9 @@ GLOBAL_EMBEDDING = None
 def get_embeddings():
     global GLOBAL_EMBEDDING
     if GLOBAL_EMBEDDING is None:
-        logger.info("Lazy loading AI Embedding Model...")
-        GLOBAL_EMBEDDING = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+        logger.info("Lazy loading Gemini Embedding Model...")
+        # Uses the Gemini API key already in your environment!
+        GLOBAL_EMBEDDING = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
     return GLOBAL_EMBEDDING
 
 async def ask_question_stream(query: str, history: list, username: str, filename: str, session_id: int, strict_mode: bool, image_data: str = None):

@@ -19,8 +19,6 @@ python-jose==3.5.0
 python-multipart==0.0.22
 SQLAlchemy==2.0.48
 uvicorn==0.41.0
-sentence-transformers==5.2.3
-
 # --- LET PIP RESOLVE THESE AUTOMATICALLY ---
 google-genai
 supabase
