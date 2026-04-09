@@ -1,4 +1,5 @@
 import ReactMarkdown from "react-markdown";
+import ReactDOM from 'react-dom';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { useState, useRef, useEffect, useContext, useCallback } from "react";
@@ -199,6 +200,7 @@ function ChatBox() {
   const [chatSessions,  setChatSessions]  = useState([]);
   const [activeSession, setActiveSession] = useState(null);
   const [activeMenu,    setActiveMenu]    = useState(null);
+  const [menuBtnRect,   setMenuBtnRect]   = useState(null);
 
   // ── UI state ──────────────────────────────────────
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -403,6 +405,42 @@ function ChatBox() {
     } catch { showToast('Failed to remove document.', 'error'); }
   };
 
+  /* ── Context menu (portal) ───────────────────────── */
+  const openMenu = (id, e) => {
+    e.stopPropagation();
+    setMenuBtnRect(e.currentTarget.getBoundingClientRect());
+    setActiveMenu(id);
+  };
+
+  const getMenuContent = () => {
+    if (!activeMenu) return null;
+    if (activeMenu.startsWith('c-')) {
+      const session = chatSessions.find(s => `c-${s.id}` === activeMenu);
+      if (!session) return null;
+      return (
+        <>
+          <button className="hk-dd-item" onClick={e => handleRenameChat(session.id, session.title, e)}>
+            {Icon.edit} Rename
+          </button>
+          <button className="hk-dd-item danger" onClick={e => handleDeleteChat(session.id, e)}>
+            {Icon.trash} Delete
+          </button>
+        </>
+      );
+    }
+    if (activeMenu.startsWith('f-')) {
+      const idx = parseInt(activeMenu.replace('f-', ''), 10);
+      const file = libraryFiles[idx];
+      if (file == null) return null;
+      return (
+        <button className="hk-dd-item danger" onClick={e => handleDeleteDocument(file, e)}>
+          {Icon.trash} Remove
+        </button>
+      );
+    }
+    return null;
+  };
+
   /* ── Textarea auto-resize ────────────────────────── */
   const adjustHeight = () => {
     const ta = textareaRef.current;
@@ -495,8 +533,10 @@ function ChatBox() {
 
   useEffect(() => {
     const close = (e) => {
-      if (!e.target.closest('.hk-sb-dots') && !e.target.closest('.hk-dropdown'))
+      if (!e.target.closest('.hk-sb-dots') && !e.target.closest('.hk-dropdown')) {
         setActiveMenu(null);
+        setMenuBtnRect(null);
+      }
     };
     window.addEventListener('click', close);
     return () => window.removeEventListener('click', close);
@@ -524,6 +564,28 @@ function ChatBox() {
     <>
       <Toast toasts={toasts} onRemove={removeToast} />
       <Dialog dialog={dialog} onClose={closeDialog} />
+
+      {/* ── Context menu portal (renders outside overflow clipping) ── */}
+      {activeMenu && menuBtnRect && ReactDOM.createPortal(
+        <div
+          className="hk-dropdown"
+          style={{
+            position: 'fixed',
+            top: (() => {
+              const menuH = activeMenu.startsWith('c-') ? 80 : 44;
+              return menuBtnRect.bottom + menuH > window.innerHeight
+                ? menuBtnRect.top - menuH - 4
+                : menuBtnRect.bottom + 4;
+            })(),
+            left: Math.max(4, Math.min(menuBtnRect.right - 132, window.innerWidth - 136)),
+            zIndex: 1000,
+          }}
+          onClick={e => e.stopPropagation()}
+        >
+          {getMenuContent()}
+        </div>,
+        document.body,
+      )}
 
       <div
         className="hk-app"
@@ -566,19 +628,9 @@ function ChatBox() {
                       </span>
                       <button
                         className="hk-sb-dots"
-                        onClick={e => { e.stopPropagation(); setActiveMenu(`c-${session.id}`); }}
+                        onClick={e => openMenu(`c-${session.id}`, e)}
                         title="Options"
                       >⋯</button>
-                      {activeMenu === `c-${session.id}` && (
-                        <div className="hk-dropdown">
-                          <button className="hk-dd-item" onClick={e => handleRenameChat(session.id, session.title, e)}>
-                            {Icon.edit} Rename
-                          </button>
-                          <button className="hk-dd-item danger" onClick={e => handleDeleteChat(session.id, e)}>
-                            {Icon.trash} Delete
-                          </button>
-                        </div>
-                      )}
                     </button>
                   ))
               }
@@ -601,16 +653,9 @@ function ChatBox() {
                   </span>
                   <button
                     className="hk-sb-dots"
-                    onClick={e => { e.stopPropagation(); setActiveMenu(`f-${idx}`); }}
+                    onClick={e => openMenu(`f-${idx}`, e)}
                     title="Options"
                   >⋯</button>
-                  {activeMenu === `f-${idx}` && (
-                    <div className="hk-dropdown">
-                      <button className="hk-dd-item danger" onClick={e => handleDeleteDocument(file, e)}>
-                        {Icon.trash} Remove
-                      </button>
-                    </div>
-                  )}
                 </button>
               ))}
             </div>
