@@ -1,5 +1,7 @@
 import React, { createContext, useState } from 'react';
 
+const API_URL = process.env.REACT_APP_API_URL || "http://127.0.0.1:8000";
+
 export const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
@@ -13,7 +15,7 @@ export const AuthProvider = ({ children }) => {
         formData.append('password', password);
 
         try {
-            const response = await fetch('http://localhost:8000/token', {
+            const response = await fetch(`${API_URL}/token`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded',
