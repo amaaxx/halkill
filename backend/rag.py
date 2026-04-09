@@ -5,7 +5,6 @@ from dotenv import load_dotenv
 from langchain_community.document_loaders import PyMuPDFLoader, TextLoader, CSVLoader
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_google_genai import GoogleGenerativeAIEmbeddings 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage
 from supabase.client import create_client
@@ -37,11 +36,32 @@ llm = ChatGoogleGenerativeAI(
 
 GLOBAL_EMBEDDING = None
 
+class FastEmbedPaddedEmbeddings:
+    def __init__(self):
+        # We import fastembed locally so it doesn't crash during global load if missing
+        from fastembed import TextEmbedding
+        # Use bge-small because it's very lightweight (~120MB) and highly accurate
+        self.model = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
+    
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        # fastembed returns generator of numpy arrays
+        embeddings = list(self.model.embed(texts))
+        padded = []
+        for emb in embeddings:
+            vec = emb.tolist()
+            # Pad 384 dimensions to 768 dimensions to fit Supabase schema
+            padded.append(vec + [0.0] * (768 - len(vec)))
+        return padded
+
+    def embed_query(self, text: str) -> list[float]:
+        emb = list(self.model.embed([text]))[0].tolist()
+        return emb + [0.0] * (768 - len(emb))
+
 def get_embeddings():
     global GLOBAL_EMBEDDING
     if GLOBAL_EMBEDDING is None:
-        logger.info("Lazy loading Gemini Embedding Model...")
-        GLOBAL_EMBEDDING = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001")
+        logger.info("Lazy loading local FastEmbed Model (bge-small)...")
+        GLOBAL_EMBEDDING = FastEmbedPaddedEmbeddings()
     return GLOBAL_EMBEDDING
 
 async def ask_question_stream(query: str, history: list, username: str, filename: str, session_id: int, strict_mode: bool, image_data: str = None):
@@ -111,7 +131,7 @@ async def ask_question_stream(query: str, history: list, username: str, filename
     messages.append(HumanMessage(content=h_content))
 
     full_ai_response = ""
-    max_retries = 3
+    max_retries = 5
     for attempt in range(max_retries):
         try:
             async for chunk in llm.astream(messages):
@@ -121,9 +141,10 @@ async def ask_question_stream(query: str, history: list, username: str, filename
             break
         except Exception as e:
             if "429" in str(e) and attempt < max_retries - 1:
-                wait_time = (2 ** attempt) + 1
+                wait_time = (2 ** attempt) * 3  # 3, 6, 12, 24 seconds backoff
                 logger.warning(f"Rate limited. Retrying in {wait_time}s...")
-                time.sleep(wait_time)
+                import asyncio
+                await asyncio.sleep(wait_time)
                 continue
             else:
                 logger.error(f"Engine Error: {str(e)}")
@@ -167,7 +188,8 @@ def add_document_to_vector_store(file_path: str, username: str, filename: str):
             docs.append(Document(page_content=current_chunk, metadata={"source": filename, "page": f"Rows {start_row}-{len(df)+1}"}))
     
     if not is_tabular:
-        chunks = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=400).split_documents(docs)
+        # Increased chunk size to reduce database load and processing chunks
+        chunks = RecursiveCharacterTextSplitter(chunk_size=3000, chunk_overlap=600).split_documents(docs)
     else:
         chunks = docs 
 

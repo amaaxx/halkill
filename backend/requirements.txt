@@ -24,3 +24,4 @@ google-genai
 supabase
 gunicorn==21.2.0
 pg8000
+fastembed>=0.2.0
