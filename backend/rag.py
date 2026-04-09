@@ -9,7 +9,7 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage
 from supabase.client import create_client
-from langchain_community.vectorstores import SupabaseVectorStore
+
 
 from logger import get_logger
 from database import SessionLocal
@@ -41,8 +41,7 @@ def get_embeddings():
     global GLOBAL_EMBEDDING
     if GLOBAL_EMBEDDING is None:
         logger.info("Lazy loading Gemini Embedding Model...")
-        # Uses the Gemini API key already in your environment!
-        GLOBAL_EMBEDDING = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
+        GLOBAL_EMBEDDING = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001")
     return GLOBAL_EMBEDDING
 
 async def ask_question_stream(query: str, history: list, username: str, filename: str, session_id: int, strict_mode: bool, image_data: str = None):
@@ -176,17 +175,23 @@ def add_document_to_vector_store(file_path: str, username: str, filename: str):
         chunk.metadata["username"] = username
         chunk.metadata["source"] = filename
 
-    # BATCH INSERTION TO CLOUD DB
-    batch_size = 100 
-    
-    # Initialize connection right before uploading
-    vector_store = SupabaseVectorStore(
-        client=supabase,
-        embedding=get_embeddings(),
-        table_name="langchain_vecs",
-        query_name="match_vecs",
-    )
-    
+    # BATCH INSERTION TO CLOUD DB (raw insert to bypass supabase-py/LangChain incompatibility)
+    batch_size = 100
+    embedder = get_embeddings()
+
     for i in range(0, len(chunks), batch_size):
-        vector_store.add_documents(chunks[i:i+batch_size])
+        batch = chunks[i:i+batch_size]
+        texts = [c.page_content for c in batch]
+        metadatas = [c.metadata for c in batch]
+        vectors = embedder.embed_documents(texts)
+
+        rows = [
+            {
+                "content": texts[j],
+                "metadata": metadatas[j],
+                "embedding": vectors[j],
+            }
+            for j in range(len(batch))
+        ]
+        supabase.table("langchain_vecs").insert(rows).execute()
         time.sleep(0.2)
