@@ -9,7 +9,7 @@ import uuid
 
 from database import engine, get_db
 import models, schemas, security
-from rag import ask_question_stream, add_document_to_vector_store
+from rag import ask_question_stream, add_document_to_vector_store, supabase as rag_supabase
 from logger import get_logger
 
 from fastapi import Depends, status
@@ -146,13 +146,30 @@ def delete_chat(session_id: int, current_user: models.User = Depends(get_current
     db.commit()
     return {"success": True}
 
+@app.get("/documents/{filename}/url")
+def get_document_url(filename: str, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    doc = db.query(models.Document).filter(models.Document.filename == filename, models.Document.owner_id == current_user.id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    storage_path = f"{current_user.username}/{filename}"
+    try:
+        result = rag_supabase.storage.from_("halkill_documents").get_public_url(storage_path)
+        return {"url": result}
+    except Exception as e:
+        logger.error(f"Failed to get public URL for {storage_path}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Could not retrieve document URL")
+
 @app.delete("/documents/{filename}")
 def delete_document(filename: str, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     docs = db.query(models.Document).filter(models.Document.filename == filename, models.Document.owner_id == current_user.id).all()
     for doc in docs: db.delete(doc)
-    
-    # Optional: You could also add logic here to delete the vectors from Supabase
     db.commit()
+    # Also delete from Supabase Storage
+    storage_path = f"{current_user.username}/{filename}"
+    try:
+        rag_supabase.storage.from_("halkill_documents").remove([storage_path])
+    except Exception as e:
+        logger.warning(f"Could not remove file from storage: {str(e)}")
     return {"success": True}
 
 @app.post("/upload")
@@ -160,17 +177,30 @@ async def upload_document(file: UploadFile = File(...), current_user: models.Use
     # Create Ephemeral Temp Directory (Safe for Render)
     os.makedirs("/tmp/halkill_data", exist_ok=True)
     file_path = os.path.join("/tmp/halkill_data", file.filename)
-    
+
+    file_bytes = await file.read()
     with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-        
+        buffer.write(file_bytes)
+
     new_doc = models.Document(filename=file.filename, owner_id=current_user.id)
     db.add(new_doc)
     db.commit()
-    
+
+    # Upload raw file to Supabase Storage for frontend PDF viewer
+    storage_path = f"{current_user.username}/{file.filename}"
     try:
-        # Extracts to Supabase pgvector
-        add_document_to_vector_store(file_path, current_user.username, file.filename) 
+        rag_supabase.storage.from_("halkill_documents").upload(
+            path=storage_path,
+            file=file_bytes,
+            file_options={"content-type": file.content_type or "application/octet-stream", "upsert": "true"}
+        )
+        logger.info(f"Uploaded '{file.filename}' to Supabase Storage at '{storage_path}'")
+    except Exception as e:
+        logger.warning(f"Could not upload file to Supabase Storage: {str(e)}")
+
+    try:
+        # Extracts text chunks to Supabase pgvector
+        add_document_to_vector_store(file_path, current_user.username, file.filename)
     except Exception as e:
         logger.error(f"Failed to process document: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to extract text: {str(e)}")
@@ -178,5 +208,5 @@ async def upload_document(file: UploadFile = File(...), current_user: models.Use
         # Clean up ephemeral disk space
         if os.path.exists(file_path):
             os.remove(file_path)
-            
+
     return {"success": True, "filename": file.filename}

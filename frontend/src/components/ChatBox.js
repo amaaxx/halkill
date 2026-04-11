@@ -7,6 +7,7 @@ import { AuthContext } from "../AuthContext";
 import {
   askQuestionStream, uploadDocument, fetchUserLibrary, fetchUserChats,
   createChatSession, fetchChatHistory, renameChatSession, deleteChatSession, deleteDocument,
+  fetchDocumentUrl,
 } from "../api";
 import './ChatBox.css';
 
@@ -207,6 +208,11 @@ function ChatBox() {
   const [isDragging,       setIsDragging]       = useState(false);
   const [copiedId,         setCopiedId]         = useState(null);
   const [initialLoading,   setInitialLoading]   = useState(true);
+
+  // ── PDF pane state ────────────────────────────────
+  const [pdfVisible,  setPdfVisible]  = useState(false);
+  const [activePdfUrl, setActivePdfUrl] = useState(null);
+  const [activePage,  setActivePage]  = useState(1);
 
   // ── Toast + dialog ────────────────────────────────
   const [toasts, setToasts] = useState([]);
@@ -449,18 +455,33 @@ function ChatBox() {
     ta.style.height = `${Math.min(ta.scrollHeight, 150)}px`;
   };
 
+  /* ── Open citation in PDF pane ───────────────────── */
+  const handleCitationClick = useCallback((page) => {
+    if (!activePdfUrl) return;
+    setActivePage(page);
+    setPdfVisible(true);
+  }, [activePdfUrl]);
+
   /* ── Render message content ──────────────────────── */
   const renderMessageContent = (content, msgIndex, isStreaming) => {
     let text      = content;
     let badge     = null;
     let badgeClass = '';
 
-    if (text.includes('[CONFIDENCE: HIGH]'))     { badge = 'HIGH';     badgeClass = 'high';     text = text.replace('[CONFIDENCE: HIGH]', '');     }
+    if (text.includes('[CONFIDENCE: HIGH]'))      { badge = 'HIGH';     badgeClass = 'high';     text = text.replace('[CONFIDENCE: HIGH]', '');     }
     else if (text.includes('[CONFIDENCE: MEDIUM]')) { badge = 'MEDIUM';   badgeClass = 'medium';   text = text.replace('[CONFIDENCE: MEDIUM]', '');   }
     else if (text.includes('[CONFIDENCE: LOW]'))    { badge = 'LOW';      badgeClass = 'low';      text = text.replace('[CONFIDENCE: LOW]', '');      }
     else if (text.includes('[CONFIDENCE: EXTERNAL]')){ badge = 'EXTERNAL'; badgeClass = 'external'; text = text.replace('[CONFIDENCE: EXTERNAL]', ''); }
 
-    text = text.replace(/\[Source: .*?, Page: (\d+)\]/g, '`[Pg. $1]`');
+    // Normalise [Source: X, Page: N] → [Pg. N]
+    text = text.replace(/\[Source: .*?, Page: (\d+)\]/g, '[Pg. $1]');
+
+    // Pre-process: convert [Pg. X] (bare or backtick-wrapped) into markdown links
+    // so react-markdown's `a` renderer can intercept them reliably.
+    // Changing protocol to #page- to prevent ReactMarkdown from sanitizing out custom protocols.
+    text = text.replace(/`(\[Pg\.\s*(\d+)\])`/g, '[$1](#page-$2)');
+    text = text.replace(/\[Pg\.\s*(\d+)\](?!\()/g, '[Pg. $1](#page-$1)');
+
     const isEmpty = isStreaming && !text.trim();
 
     return (
@@ -480,6 +501,31 @@ function ChatBox() {
           <div className="hk-md">
             <ReactMarkdown
               components={{
+                // Citation pill via #page- pseudo-links
+                a({ href, children, ...props }) {
+                  if (href && href.startsWith('#page-')) {
+                    const page = parseInt(href.replace('#page-', ''), 10);
+                    const isActive = pdfVisible && activePage === page;
+                    return (
+                      <button
+                        className={`hk-cite-pill${isActive ? ' active-cite' : ''}`}
+                        onClick={() => handleCitationClick(page)}
+                        title={`Open page ${page} in PDF viewer`}
+                      >
+                        <span className="hk-cite-pill-icon">
+                          <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                            <polyline points="14 2 14 8 20 8"/>
+                          </svg>
+                        </span>
+                        {children}
+                      </button>
+                    );
+                  }
+                  // Regular external link
+                  return <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>;
+                },
+                // Code blocks
                 code({ node, inline, className, children, ...props }) {
                   const match = /language-(\w+)/.exec(className || '');
                   return !inline && match ? (
@@ -511,6 +557,7 @@ function ChatBox() {
     );
   };
 
+
   /* ── Effects ─────────────────────────────────────── */
   useEffect(() => {
     (async () => {
@@ -526,6 +573,21 @@ function ChatBox() {
       }
     })();
   }, []); // eslint-disable-line
+
+  // Fetch PDF URL whenever active session changes to one with a PDF document
+  useEffect(() => {
+    const filename = activeSession?.document_filename;
+    if (!filename || !filename.toLowerCase().endsWith('.pdf')) {
+      setActivePdfUrl(null);
+      setPdfVisible(false);
+      return;
+    }
+    let cancelled = false;
+    fetchDocumentUrl(filename)
+      .then(url => { if (!cancelled) setActivePdfUrl(url); })
+      .catch(() => { if (!cancelled) setActivePdfUrl(null); });
+    return () => { cancelled = true; };
+  }, [activeSession?.id]); // eslint-disable-line
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -729,11 +791,32 @@ function ChatBox() {
                   <span className={`hk-mode-label${isStrict ? ' on' : ''}`}>Strict</span>
                 </div>
               )}
+              {activePdfUrl && (
+                <button
+                  className="hk-collapse-btn"
+                  title={pdfVisible ? 'Close PDF viewer' : 'Open PDF viewer'}
+                  onClick={() => setPdfVisible(p => !p)}
+                  style={{ color: pdfVisible ? 'var(--accent-light)' : undefined }}
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                    <polyline points="14 2 14 8 20 8"/>
+                    <line x1="16" y1="13" x2="8" y2="13"/>
+                    <line x1="16" y1="17" x2="8" y2="17"/>
+                    <polyline points="10 9 9 9 8 9"/>
+                  </svg>
+                </button>
+              )}
               <button className="hk-sign-out" onClick={logout} title="Sign out">
                 {Icon.logout} Sign out
               </button>
             </div>
           </div>
+
+          {/* Content split: chat + PDF pane */}
+          <div className="hk-content-split">
+            {/* ── Chat column ── */}
+            <div className="hk-chat-col">
 
           {/* Messages */}
           <div className="hk-messages">
@@ -856,6 +939,40 @@ function ChatBox() {
               </div>
             </div>
           </div>
+
+            </div>{/* end .hk-chat-col */}
+
+            {/* ── PDF Pane ── */}
+            <div className={`hk-pdf-pane${pdfVisible && activePdfUrl ? ' open' : ''}`}>
+              {activePdfUrl && (
+                <>
+                  <div className="hk-pdf-header">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--accent-light)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                      <polyline points="14 2 14 8 20 8"/>
+                    </svg>
+                    <span className="hk-pdf-header-title">
+                      {activeSession?.document_filename}
+                    </span>
+                    <span className="hk-pdf-page-badge">Pg. {activePage}</span>
+                    <button
+                      className="hk-pdf-close"
+                      onClick={() => setPdfVisible(false)}
+                      title="Close PDF viewer"
+                    >✕</button>
+                  </div>
+                  <div className="hk-pdf-iframe-wrap">
+                    <iframe
+                      key={`${activePdfUrl}#page=${activePage}`}
+                      src={`${activePdfUrl}#page=${activePage}`}
+                      title={`${activeSession?.document_filename} — Page ${activePage}`}
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+
+          </div>{/* end .hk-content-split */}
 
         </div>
       </div>

@@ -115,3 +115,15 @@ export async function deleteDocument(filename) {
   });
   if (!res.ok) throw new Error("Failed to delete document");
 }
+
+export async function fetchDocumentUrl(filename) {
+  const token = localStorage.getItem('token');
+  const encodedFilename = encodeURIComponent(filename);
+  const res = await fetch(`${API_URL}/documents/${encodedFilename}/url`, {
+    method: "GET",
+    headers: { "Authorization": `Bearer ${token}` }
+  });
+  if (!res.ok) throw new Error("Failed to fetch document URL");
+  const data = await res.json();
+  return data.url;
+}
