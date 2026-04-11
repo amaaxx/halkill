@@ -1,5 +1,14 @@
 import os
 import time
+
+# Enforce strictly 1 thread for all underlying math libraries to prevent memory leaks in cloud containers
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 import pandas as pd
 from dotenv import load_dotenv
 from langchain_community.document_loaders import PyMuPDFLoader, TextLoader, CSVLoader
@@ -38,10 +47,9 @@ GLOBAL_EMBEDDING = None
 
 class FastEmbedPaddedEmbeddings:
     def __init__(self):
-        # We import fastembed locally so it doesn't crash during global load if missing
         from fastembed import TextEmbedding
-        # Use bge-small because it's very lightweight (~120MB) and highly accurate
-        self.model = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
+        # Limit to 1 thread safely so the Cloud server doesn't allocate huge multithreading buffers (~300MB saved)
+        self.model = TextEmbedding(model_name="BAAI/bge-small-en-v1.5", threads=1)
     
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         # fastembed returns generator of numpy arrays
@@ -49,7 +57,7 @@ class FastEmbedPaddedEmbeddings:
         padded = []
         for emb in embeddings:
             vec = emb.tolist()
-            # Pad 384 dimensions to 768 dimensions to fit Supabase schema
+            # Pad 384 dimensions to 768 dimensions to fit Supabase schema natively
             padded.append(vec + [0.0] * (768 - len(vec)))
         return padded
 
@@ -60,7 +68,7 @@ class FastEmbedPaddedEmbeddings:
 def get_embeddings():
     global GLOBAL_EMBEDDING
     if GLOBAL_EMBEDDING is None:
-        logger.info("Lazy loading local FastEmbed Model (bge-small)...")
+        logger.info("Lazy loading highly-optimized local FastEmbed Model (bge-small)...")
         GLOBAL_EMBEDDING = FastEmbedPaddedEmbeddings()
     return GLOBAL_EMBEDDING
 
