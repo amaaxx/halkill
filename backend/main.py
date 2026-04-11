@@ -142,6 +142,8 @@ def rename_chat(session_id: int, req: ChatRename, current_user: models.User = De
 def delete_chat(session_id: int, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     session = db.query(models.ChatSession).filter(models.ChatSession.id == session_id, models.ChatSession.owner_id == current_user.id).first()
     if not session: raise HTTPException(status_code=404)
+    # Delete child messages first to satisfy foreign key constraint
+    db.query(models.ChatMessage).filter(models.ChatMessage.session_id == session_id).delete()
     db.delete(session)
     db.commit()
     return {"success": True}
