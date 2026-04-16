@@ -1006,8 +1006,8 @@ function ChatBox() {
                   </div>
                   <div className="hk-pdf-iframe-wrap">
                     <iframe
-                      key={activePdfUrl}
-                      src={`${activePdfUrl}#page=${activePage}${searchQuery ? `&search=${encodeURIComponent(searchQuery)}` : ''}`}
+                      key={`${activePdfUrl}#page=${activePage}${searchQuery}`}
+                      src={`${activePdfUrl}#page=${activePage}&view=FitH${searchQuery ? `&search=${encodeURIComponent(searchQuery)}` : ''}`}
                       title={`${activeSession?.document_filename} — Page ${activePage}`}
                     />
                   </div>
