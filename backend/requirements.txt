@@ -6,7 +6,6 @@ langchain==1.2.10
 langchain-community==0.4.1
 langchain-core==1.2.18
 langchain-google-genai==4.2.1
-langchain-huggingface==1.2.1
 langchain-text-splitters==1.1.1
 numpy==2.4.3
 pandas
@@ -24,4 +23,3 @@ google-genai
 supabase
 gunicorn==21.2.0
 pg8000
-fastembed>=0.2.0

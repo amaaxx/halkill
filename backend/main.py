@@ -1,11 +1,15 @@
 import os
-import shutil
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
-from typing import List, Dict, Any
+from typing import List
 import uuid
+
+# Thread pool for running blocking CPU/IO tasks without blocking the event loop
+_EXECUTOR = ThreadPoolExecutor(max_workers=2)
 
 from database import engine, get_db
 import models, schemas, security
@@ -201,8 +205,15 @@ async def upload_document(file: UploadFile = File(...), current_user: models.Use
         logger.warning(f"Could not upload file to Supabase Storage: {str(e)}")
 
     try:
-        # Extracts text chunks to Supabase pgvector
-        add_document_to_vector_store(file_path, current_user.username, file.filename)
+        # Run blocking PDF/embedding processing in a thread pool so we don't block the event loop
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            _EXECUTOR,
+            add_document_to_vector_store,
+            file_path,
+            current_user.username,
+            file.filename
+        )
     except Exception as e:
         logger.error(f"Failed to process document: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to extract text: {str(e)}")

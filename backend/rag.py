@@ -1,20 +1,13 @@
 import os
 import time
-
-# Enforce strictly 1 thread for all underlying math libraries to prevent memory leaks in cloud containers
-os.environ["OMP_NUM_THREADS"] = "1"
-os.environ["MKL_NUM_THREADS"] = "1"
-os.environ["OPENBLAS_NUM_THREADS"] = "1"
-os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
-os.environ["NUMEXPR_NUM_THREADS"] = "1"
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
+import asyncio
 
 import pandas as pd
 from dotenv import load_dotenv
-from langchain_community.document_loaders import PyMuPDFLoader, TextLoader, CSVLoader
+from langchain_community.document_loaders import PyMuPDFLoader, TextLoader
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_core.messages import SystemMessage, HumanMessage
 from supabase.client import create_client
 
@@ -45,31 +38,47 @@ llm = ChatGoogleGenerativeAI(
 
 GLOBAL_EMBEDDING = None
 
-class FastEmbedPaddedEmbeddings:
+# Dimension target for Supabase pgvector schema
+TARGET_DIMS = 768
+
+class CloudEmbeddings:
+    """Zero-RAM cloud embeddings via Gemini API with built-in rate-limit protection."""
     def __init__(self):
-        from fastembed import TextEmbedding
-        # Limit to 1 thread safely so the Cloud server doesn't allocate huge multithreading buffers (~300MB saved)
-        self.model = TextEmbedding(model_name="BAAI/bge-small-en-v1.5", threads=1)
+        self.model = GoogleGenerativeAIEmbeddings(
+            model="models/gemini-embedding-001",
+            google_api_key=GOOGLE_API_KEY,
+        )
     
+    def _truncate(self, vec: list[float]) -> list[float]:
+        """Slice 3072-dim Gemini vectors down to 768 to fit Supabase schema."""
+        return vec[:TARGET_DIMS]
+
+    def _retry_embed(self, fn, *args, max_retries=6):
+        """Retry with exponential backoff on 429 rate-limit errors."""
+        for attempt in range(max_retries):
+            try:
+                return fn(*args)
+            except Exception as e:
+                if "429" in str(e) and attempt < max_retries - 1:
+                    wait = (2 ** attempt) * 2  # 2, 4, 8, 16, 32, 64s
+                    logger.warning(f"Embedding rate limited. Retry {attempt+1}/{max_retries} in {wait}s...")
+                    time.sleep(wait)
+                else:
+                    raise
+
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        # fastembed returns generator of numpy arrays
-        embeddings = list(self.model.embed(texts))
-        padded = []
-        for emb in embeddings:
-            vec = emb.tolist()
-            # Pad 384 dimensions to 768 dimensions to fit Supabase schema natively
-            padded.append(vec + [0.0] * (768 - len(vec)))
-        return padded
+        raw = self._retry_embed(self.model.embed_documents, texts)
+        return [self._truncate(v) for v in raw]
 
     def embed_query(self, text: str) -> list[float]:
-        emb = list(self.model.embed([text]))[0].tolist()
-        return emb + [0.0] * (768 - len(emb))
+        raw = self._retry_embed(self.model.embed_query, text)
+        return self._truncate(raw)
 
 def get_embeddings():
     global GLOBAL_EMBEDDING
     if GLOBAL_EMBEDDING is None:
-        logger.info("Lazy loading highly-optimized local FastEmbed Model (bge-small)...")
-        GLOBAL_EMBEDDING = FastEmbedPaddedEmbeddings()
+        logger.info("Initializing Cloud Embeddings (gemini-embedding-001, 0 MB local RAM)...")
+        GLOBAL_EMBEDDING = CloudEmbeddings()
     return GLOBAL_EMBEDDING
 
 async def ask_question_stream(query: str, history: list, username: str, filename: str, session_id: int, strict_mode: bool, image_data: str = None):
@@ -151,7 +160,6 @@ async def ask_question_stream(query: str, history: list, username: str, filename
             if "429" in str(e) and attempt < max_retries - 1:
                 wait_time = (2 ** attempt) * 3  # 3, 6, 12, 24 seconds backoff
                 logger.warning(f"Rate limited. Retrying in {wait_time}s...")
-                import asyncio
                 await asyncio.sleep(wait_time)
                 continue
             else:
@@ -206,7 +214,8 @@ def add_document_to_vector_store(file_path: str, username: str, filename: str):
         chunk.metadata["source"] = filename
 
     # BATCH INSERTION TO CLOUD DB (raw insert to bypass supabase-py/LangChain incompatibility)
-    batch_size = 100
+    # Small batches + delay to stay well under Gemini's 1500 RPM embedding quota
+    batch_size = 20
     embedder = get_embeddings()
 
     for i in range(0, len(chunks), batch_size):
@@ -224,4 +233,4 @@ def add_document_to_vector_store(file_path: str, username: str, filename: str):
             for j in range(len(batch))
         ]
         supabase.table("langchain_vecs").insert(rows).execute()
-        time.sleep(0.2)
+        time.sleep(1)
