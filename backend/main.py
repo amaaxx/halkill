@@ -1,15 +1,10 @@
 import os
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
-from fastapi import FastAPI, HTTPException, Request, UploadFile, File
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from typing import List
 import uuid
-
-# Thread pool for running blocking CPU/IO tasks without blocking the event loop
-_EXECUTOR = ThreadPoolExecutor(max_workers=2)
 
 from database import engine, get_db
 import models, schemas, security
@@ -179,7 +174,12 @@ def delete_document(filename: str, current_user: models.User = Depends(get_curre
     return {"success": True}
 
 @app.post("/upload")
-async def upload_document(file: UploadFile = File(...), current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+async def upload_document(
+    background_tasks: BackgroundTasks, 
+    file: UploadFile = File(...), 
+    current_user: models.User = Depends(get_current_user), 
+    db: Session = Depends(get_db)
+):
     # Create Ephemeral Temp Directory (Safe for Render)
     os.makedirs("/tmp/halkill_data", exist_ok=True)
     file_path = os.path.join("/tmp/halkill_data", file.filename)
@@ -204,22 +204,24 @@ async def upload_document(file: UploadFile = File(...), current_user: models.Use
     except Exception as e:
         logger.warning(f"Could not upload file to Supabase Storage: {str(e)}")
 
-    try:
-        # Run blocking PDF/embedding processing in a thread pool so we don't block the event loop
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(
-            _EXECUTOR,
-            add_document_to_vector_store,
-            file_path,
-            current_user.username,
-            file.filename
-        )
-    except Exception as e:
-        logger.error(f"Failed to process document: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to extract text: {str(e)}")
-    finally:
-        # Clean up ephemeral disk space
-        if os.path.exists(file_path):
-            os.remove(file_path)
+    # Offload the heavy embedding generation to a native FastAPI background task
+    # This prevents the request from hanging and hitting Render's 100-second timeout limit
+    background_tasks.add_task(
+        process_and_cleanup_document,
+        file_path,
+        current_user.username,
+        file.filename
+    )
 
     return {"success": True, "filename": file.filename}
+
+def process_and_cleanup_document(file_path: str, username: str, filename: str):
+    """Executes the computationally heavy embedding extraction, then automatically cleans up."""
+    try:
+        add_document_to_vector_store(file_path, username, filename)
+    except Exception as e:
+        logger.error(f"Failed to process document: {str(e)}")
+    finally:
+        # Clean up ephemeral disk space AFTER processing finishes exactly
+        if os.path.exists(file_path):
+            os.remove(file_path)
