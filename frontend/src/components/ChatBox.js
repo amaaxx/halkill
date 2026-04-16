@@ -478,13 +478,21 @@ function ChatBox() {
     // Normalise [Source: X, Page: N] → [Pg. N]
     text = text.replace(/\[Source: .*?, Page: (\d+)\]/g, '[Pg. $1]');
 
+    // PRE-PROCESSOR 0: Handle grouped AI citations like [Pg. 71, Pg. 17, Pg. 18] or [Pg. 71, 17]
+    // And convert them to individual links before markdown parsing.
+    text = text.replace(/\[\s*(?:Pg\.?|Pages?|P\.?)\s*\d+(?:(?:,|\s+and\s+|\s*&\s*)\s*(?:Pg\.?|Pages?|P\.?)?\s*\d+)+\s*\]/gi, (match) => {
+      const numbers = match.match(/\d+/g);
+      if (!numbers) return match;
+      return numbers.map(n => `[Pg. ${n}](#page=${n})`).join(', ');
+    });
+
     // PRE-PROCESSOR 1: Fix spaces in AI-generated URLs so ReactMarkdown doesn't break
     text = text.replace(/\[([^\]]+)\]\((#page=\d+&search=)([^)]+)\)/g, (match, label, prefix, searchTerms) => {
       return `[${label}](${prefix}${encodeURIComponent(searchTerms)})`;
     });
 
-    // PRE-PROCESSOR 2: Convert bare [Pg. X] into links if AI forgets the search param entirely
-    text = text.replace(/`?\[Pg\.\s*(\d+)\]`?(?!\()/g, '[Pg. $1](#page=$1)');
+    // PRE-PROCESSOR 2: Convert bare [Pg. X] or [Page X] into links if AI forgets the search param entirely
+    text = text.replace(/`?\[\s*(?:Pg\.?|Pages?|P\.?)\s*(\d+)\s*\]`?(?!\()/gi, '[Pg. $1](#page=$1)');
 
     const isEmpty = isStreaming && !text.trim();
 
