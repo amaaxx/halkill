@@ -189,30 +189,31 @@ function ChatBox() {
   const { logout } = useContext(AuthContext);
 
   // ── Core state ────────────────────────────────────
-  const [question,      setQuestion]      = useState('');
-  const [messages,      setMessages]      = useState([]);
-  const [loading,       setLoading]       = useState(false);
-  const [uploading,     setUploading]     = useState(false);
-  const [isStrict,      setIsStrict]      = useState(true);
+  const [question, setQuestion] = useState('');
+  const [messages, setMessages] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [isStrict, setIsStrict] = useState(true);
   const [attachedImage, setAttachedImage] = useState(null);
 
   // ── Data state ────────────────────────────────────
-  const [libraryFiles,  setLibraryFiles]  = useState([]);
-  const [chatSessions,  setChatSessions]  = useState([]);
+  const [libraryFiles, setLibraryFiles] = useState([]);
+  const [chatSessions, setChatSessions] = useState([]);
   const [activeSession, setActiveSession] = useState(null);
-  const [activeMenu,    setActiveMenu]    = useState(null);
-  const [menuBtnRect,   setMenuBtnRect]   = useState(null);
+  const [activeMenu, setActiveMenu] = useState(null);
+  const [menuBtnRect, setMenuBtnRect] = useState(null);
 
   // ── UI state ──────────────────────────────────────
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [isDragging,       setIsDragging]       = useState(false);
-  const [copiedId,         setCopiedId]         = useState(null);
-  const [initialLoading,   setInitialLoading]   = useState(true);
+  const [isDragging, setIsDragging] = useState(false);
+  const [copiedId, setCopiedId] = useState(null);
+  const [initialLoading, setInitialLoading] = useState(true);
 
   // ── PDF pane state ────────────────────────────────
-  const [pdfVisible,  setPdfVisible]  = useState(false);
+  const [pdfVisible, setPdfVisible] = useState(false);
   const [activePdfUrl, setActivePdfUrl] = useState(null);
-  const [activePage,  setActivePage]  = useState(1);
+  const [activePage, setActivePage] = useState(1);
+  const [searchQuery, setSearchQuery] = useState("");
 
   // ── Toast + dialog ────────────────────────────────
   const [toasts, setToasts] = useState([]);
@@ -220,7 +221,7 @@ function ChatBox() {
 
   // ── Refs ──────────────────────────────────────────
   const messagesEndRef = useRef(null);
-  const textareaRef    = useRef(null);
+  const textareaRef = useRef(null);
 
   /* ── Helpers ─────────────────────────────────────── */
   const showToast = useCallback((message, type = 'info', ms = 3500) => {
@@ -306,7 +307,7 @@ function ChatBox() {
   };
 
   /* ── Drag & drop ─────────────────────────────────── */
-  const handleDragOver  = (e) => { e.preventDefault(); setIsDragging(true); };
+  const handleDragOver = (e) => { e.preventDefault(); setIsDragging(true); };
   const handleDragLeave = (e) => { e.preventDefault(); if (!e.currentTarget.contains(e.relatedTarget)) setIsDragging(false); };
   const handleDrop = async (e) => {
     e.preventDefault();
@@ -324,13 +325,13 @@ function ChatBox() {
 
   /* ── Ask ─────────────────────────────────────────── */
   async function handleAsk(overrideText = null) {
-    const text   = overrideText || question;
+    const text = overrideText || question;
     const imgSnap = attachedImage;
     if (!text.trim() && !imgSnap) return;
     if (!activeSession) return;
 
-    const userContent  = imgSnap ? `![Attached Image](${imgSnap})\n\n${text}` : text;
-    const chatHistory  = messages
+    const userContent = imgSnap ? `![Attached Image](${imgSnap})\n\n${text}` : text;
+    const chatHistory = messages
       .filter(m => m.role === 'user' || m.role === 'ai')
       .map(m => ({ role: m.role, content: m.content }));
 
@@ -345,9 +346,9 @@ function ChatBox() {
       await askQuestionStream(
         text, chatHistory,
         (chunk) => setMessages(prev => {
-          const arr  = [...prev];
+          const arr = [...prev];
           const last = arr.length - 1;
-          arr[last]  = { ...arr[last], content: arr[last].content + chunk };
+          arr[last] = { ...arr[last], content: arr[last].content + chunk };
           return arr;
         }),
         activeSession.document_filename, activeSession.id, isStrict, imgSnap,
@@ -373,8 +374,8 @@ function ChatBox() {
     e.stopPropagation();
     setActiveMenu(null);
     const newTitle = await showDialog('prompt', {
-      title:       'Rename Chat',
-      message:     'Enter a new name for this chat.',
+      title: 'Rename Chat',
+      message: 'Enter a new name for this chat.',
       defaultValue: currentTitle,
       placeholder: 'Chat name…',
     });
@@ -456,31 +457,34 @@ function ChatBox() {
   };
 
   /* ── Open citation in PDF pane ───────────────────── */
-  const handleCitationClick = useCallback((page) => {
+  const handleCitationClick = useCallback((page, search) => {
     if (!activePdfUrl) return;
     setActivePage(page);
+    setSearchQuery(search || "");
     setPdfVisible(true);
   }, [activePdfUrl]);
 
   /* ── Render message content ──────────────────────── */
   const renderMessageContent = (content, msgIndex, isStreaming) => {
-    let text      = content;
-    let badge     = null;
+    let text = content;
+    let badge = null;
     let badgeClass = '';
 
-    if (text.includes('[CONFIDENCE: HIGH]'))      { badge = 'HIGH';     badgeClass = 'high';     text = text.replace('[CONFIDENCE: HIGH]', '');     }
-    else if (text.includes('[CONFIDENCE: MEDIUM]')) { badge = 'MEDIUM';   badgeClass = 'medium';   text = text.replace('[CONFIDENCE: MEDIUM]', '');   }
-    else if (text.includes('[CONFIDENCE: LOW]'))    { badge = 'LOW';      badgeClass = 'low';      text = text.replace('[CONFIDENCE: LOW]', '');      }
-    else if (text.includes('[CONFIDENCE: EXTERNAL]')){ badge = 'EXTERNAL'; badgeClass = 'external'; text = text.replace('[CONFIDENCE: EXTERNAL]', ''); }
+    if (text.includes('[CONFIDENCE: HIGH]')) { badge = 'HIGH'; badgeClass = 'high'; text = text.replace('[CONFIDENCE: HIGH]', ''); }
+    else if (text.includes('[CONFIDENCE: MEDIUM]')) { badge = 'MEDIUM'; badgeClass = 'medium'; text = text.replace('[CONFIDENCE: MEDIUM]', ''); }
+    else if (text.includes('[CONFIDENCE: LOW]')) { badge = 'LOW'; badgeClass = 'low'; text = text.replace('[CONFIDENCE: LOW]', ''); }
+    else if (text.includes('[CONFIDENCE: EXTERNAL]')) { badge = 'EXTERNAL'; badgeClass = 'external'; text = text.replace('[CONFIDENCE: EXTERNAL]', ''); }
 
     // Normalise [Source: X, Page: N] → [Pg. N]
     text = text.replace(/\[Source: .*?, Page: (\d+)\]/g, '[Pg. $1]');
 
-    // Pre-process: convert [Pg. X] (bare or backtick-wrapped) into markdown links
-    // so react-markdown's `a` renderer can intercept them reliably.
-    // Changing protocol to #page- to prevent ReactMarkdown from sanitizing out custom protocols.
-    text = text.replace(/`(\[Pg\.\s*(\d+)\])`/g, '[$1](#page-$2)');
-    text = text.replace(/\[Pg\.\s*(\d+)\](?!\()/g, '[Pg. $1](#page-$1)');
+    // PRE-PROCESSOR 1: Fix spaces in AI-generated URLs so ReactMarkdown doesn't break
+    text = text.replace(/\[([^\]]+)\]\((#page=\d+&search=)([^)]+)\)/g, (match, label, prefix, searchTerms) => {
+      return `[${label}](${prefix}${encodeURIComponent(searchTerms)})`;
+    });
+
+    // PRE-PROCESSOR 2: Convert bare [Pg. X] into links if AI forgets the search param entirely
+    text = text.replace(/`?\[Pg\.\s*(\d+)\]`?(?!\()/g, '[Pg. $1](#page=$1)');
 
     const isEmpty = isStreaming && !text.trim();
 
@@ -501,21 +505,33 @@ function ChatBox() {
           <div className="hk-md">
             <ReactMarkdown
               components={{
-                // Citation pill via #page- pseudo-links
+                // Citation pill via hash parameters
                 a({ href, children, ...props }) {
-                  if (href && href.startsWith('#page-')) {
-                    const page = parseInt(href.replace('#page-', ''), 10);
+                  if (href && (href.startsWith('#page=') || href.startsWith('#page-'))) {
+                    let page = 1;
+                    let search = "";
+
+                    if (href.startsWith('#page=')) {
+                      // Safely extract parameters even if URL encoded
+                      const params = new URLSearchParams(href.split('#')[1]);
+                      page = parseInt(params.get('page'), 10);
+                      // Strip out any trailing/leading quotes the AI might have accidentally added
+                      search = (params.get('search') || "").replace(/(^"|"$)/g, '');
+                    } else {
+                      page = parseInt(href.replace('#page-', ''), 10);
+                    }
+
                     const isActive = pdfVisible && activePage === page;
                     return (
                       <button
                         className={`hk-cite-pill${isActive ? ' active-cite' : ''}`}
-                        onClick={() => handleCitationClick(page)}
+                        onClick={() => handleCitationClick(page, search)}
                         title={`Open page ${page} in PDF viewer`}
                       >
                         <span className="hk-cite-pill-icon">
                           <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                            <polyline points="14 2 14 8 20 8"/>
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                            <polyline points="14 2 14 8 20 8" />
                           </svg>
                         </span>
                         {children}
@@ -574,7 +590,7 @@ function ChatBox() {
     })();
   }, []); // eslint-disable-line
 
-  // Fetch PDF URL whenever active session changes to one with a PDF document
+  // Fetch PDF URL and convert to Same-Origin Blob to bypass Chrome XS-Search blocks
   useEffect(() => {
     const filename = activeSession?.document_filename;
     if (!filename || !filename.toLowerCase().endsWith('.pdf')) {
@@ -582,11 +598,38 @@ function ChatBox() {
       setPdfVisible(false);
       return;
     }
+
     let cancelled = false;
-    fetchDocumentUrl(filename)
-      .then(url => { if (!cancelled) setActivePdfUrl(url); })
-      .catch(() => { if (!cancelled) setActivePdfUrl(null); });
-    return () => { cancelled = true; };
+    let blobUrl = null;
+
+    const loadPdfBlob = async () => {
+      try {
+        // 1. Get the remote URL (Render or Supabase)
+        const url = await fetchDocumentUrl(filename);
+
+        // 2. Fetch the actual file bytes via AJAX
+        // (This works perfectly because we already added Vercel to your backend CORS!)
+        const response = await fetch(url);
+        if (!response.ok) throw new Error("Failed to fetch PDF");
+
+        // 3. Convert to a local Same-Origin URL
+        const blob = await response.blob();
+        blobUrl = URL.createObjectURL(blob);
+
+        if (!cancelled) setActivePdfUrl(blobUrl);
+      } catch (err) {
+        console.error("PDF Blob Error:", err);
+        if (!cancelled) setActivePdfUrl(null);
+      }
+    };
+
+    loadPdfBlob();
+
+    return () => {
+      cancelled = true;
+      // Clean up memory when the chat changes
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+    };
   }, [activeSession?.id]); // eslint-disable-line
 
   useEffect(() => {
@@ -617,7 +660,7 @@ function ChatBox() {
     return () => window.removeEventListener('keydown', onKey);
   }, []); // eslint-disable-line
 
-  const canSend = !!(( question.trim() || attachedImage) && activeSession && !loading && !uploading);
+  const canSend = !!((question.trim() || attachedImage) && activeSession && !loading && !uploading);
 
   /* ══════════════════════════════════════════════════
      Render
@@ -674,27 +717,27 @@ function ChatBox() {
             <div className="hk-sb-list">
               {initialLoading
                 ? [1, 2, 3].map(i => (
-                    <div key={i} style={{ padding: '9px 9px' }}>
-                      <div className="hk-shimmer" style={{ width: `${55 + i * 12}%` }} />
-                    </div>
-                  ))
+                  <div key={i} style={{ padding: '9px 9px' }}>
+                    <div className="hk-shimmer" style={{ width: `${55 + i * 12}%` }} />
+                  </div>
+                ))
                 : chatSessions.map(session => (
+                  <button
+                    key={`c-${session.id}`}
+                    className={`hk-sb-item${activeSession?.id === session.id ? ' active' : ''}`}
+                    onClick={() => handleSelectSession(session)}
+                  >
+                    <span className="hk-sb-item-text">
+                      <span style={{ marginRight: 7, opacity: .5, fontSize: '.77rem' }}>💬</span>
+                      {session.title}
+                    </span>
                     <button
-                      key={`c-${session.id}`}
-                      className={`hk-sb-item${activeSession?.id === session.id ? ' active' : ''}`}
-                      onClick={() => handleSelectSession(session)}
-                    >
-                      <span className="hk-sb-item-text">
-                        <span style={{ marginRight: 7, opacity: .5, fontSize: '.77rem' }}>💬</span>
-                        {session.title}
-                      </span>
-                      <button
-                        className="hk-sb-dots"
-                        onClick={e => openMenu(`c-${session.id}`, e)}
-                        title="Options"
-                      >⋯</button>
-                    </button>
-                  ))
+                      className="hk-sb-dots"
+                      onClick={e => openMenu(`c-${session.id}`, e)}
+                      title="Options"
+                    >⋯</button>
+                  </button>
+                ))
               }
             </div>
           </div>
@@ -799,11 +842,11 @@ function ChatBox() {
                   style={{ color: pdfVisible ? 'var(--accent-light)' : undefined }}
                 >
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                    <polyline points="14 2 14 8 20 8"/>
-                    <line x1="16" y1="13" x2="8" y2="13"/>
-                    <line x1="16" y1="17" x2="8" y2="17"/>
-                    <polyline points="10 9 9 9 8 9"/>
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                    <line x1="16" y1="13" x2="8" y2="13" />
+                    <line x1="16" y1="17" x2="8" y2="17" />
+                    <polyline points="10 9 9 9 8 9" />
                   </svg>
                 </button>
               )}
@@ -818,127 +861,127 @@ function ChatBox() {
             {/* ── Chat column ── */}
             <div className="hk-chat-col">
 
-          {/* Messages */}
-          <div className="hk-messages">
-            <div className="hk-messages-inner">
+              {/* Messages */}
+              <div className="hk-messages">
+                <div className="hk-messages-inner">
 
-              {messages.length === 0 && !loading && (
-                <div className="hk-welcome">
-                  <div className="hk-welcome-logo">{Icon.bolt}</div>
-                  <h2 className="hk-welcome-h">What can I help with?</h2>
-                  <p className="hk-welcome-p">
-                    {activeSession?.document_filename
-                      ? `Context: "${activeSession.document_filename}"`
-                      : 'Start a new chat or upload a document to begin.'}
-                  </p>
+                  {messages.length === 0 && !loading && (
+                    <div className="hk-welcome">
+                      <div className="hk-welcome-logo">{Icon.bolt}</div>
+                      <h2 className="hk-welcome-h">What can I help with?</h2>
+                      <p className="hk-welcome-p">
+                        {activeSession?.document_filename
+                          ? `Context: "${activeSession.document_filename}"`
+                          : 'Start a new chat or upload a document to begin.'}
+                      </p>
 
-                  <div className="hk-suggestions">
-                    {[
-                      { icon: '📊', title: 'Analyze Document',  desc: 'Extract key points & insights.',          q: 'Give me a comprehensive summary of this document.' },
-                      { icon: '🔍', title: 'Deep Dive',          desc: 'Explore a specific topic in depth.',      q: 'What are the most important topics covered?' },
-                      { icon: '👁️', title: 'Vision Analysis',    desc: 'Attach an image for visual review.',     q: 'Describe and analyze this image in detail.' },
-                    ].map((s, i) => (
-                      <div key={i} className="hk-card" onClick={() => handleAsk(s.q)}>
-                        <div className="hk-card-icon">{s.icon}</div>
-                        <div className="hk-card-title">{s.title}</div>
-                        <div className="hk-card-desc">{s.desc}</div>
+                      <div className="hk-suggestions">
+                        {[
+                          { icon: '📊', title: 'Analyze Document', desc: 'Extract key points & insights.', q: 'Give me a comprehensive summary of this document.' },
+                          { icon: '🔍', title: 'Deep Dive', desc: 'Explore a specific topic in depth.', q: 'What are the most important topics covered?' },
+                          { icon: '👁️', title: 'Vision Analysis', desc: 'Attach an image for visual review.', q: 'Describe and analyze this image in detail.' },
+                        ].map((s, i) => (
+                          <div key={i} className="hk-card" onClick={() => handleAsk(s.q)}>
+                            <div className="hk-card-icon">{s.icon}</div>
+                            <div className="hk-card-title">{s.title}</div>
+                            <div className="hk-card-desc">{s.desc}</div>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
 
-                  <div className="hk-shortcuts">
-                    {[
-                      { keys: ['⌃K'], label: 'New chat'       },
-                      { keys: ['⌃B'], label: 'Toggle sidebar' },
-                      { keys: ['↵'],  label: 'Send'           },
-                      { keys: ['⇧↵'], label: 'New line'       },
-                    ].map((s, i) => (
-                      <div key={i} className="hk-shortcut">
-                        {s.keys.map((k, j) => <kbd key={j}>{k}</kbd>)}
-                        <span>{s.label}</span>
+                      <div className="hk-shortcuts">
+                        {[
+                          { keys: ['⌃K'], label: 'New chat' },
+                          { keys: ['⌃B'], label: 'Toggle sidebar' },
+                          { keys: ['↵'], label: 'Send' },
+                          { keys: ['⇧↵'], label: 'New line' },
+                        ].map((s, i) => (
+                          <div key={i} className="hk-shortcut">
+                            {s.keys.map((k, j) => <kbd key={j}>{k}</kbd>)}
+                            <span>{s.label}</span>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {messages.map((msg, index) => {
-                const isLastMsg   = index === messages.length - 1;
-                const isStreaming = loading && isLastMsg && msg.role === 'ai';
-                return (
-                  <div key={index} className={`hk-msg-wrap ${msg.role}`}>
-                    <div className={`hk-avatar ${msg.role}`}>
-                      {msg.role === 'ai' ? Icon.boltPurple : Icon.user}
                     </div>
-                    <div className={`hk-bubble ${msg.role}`}>
-                      {msg.role === 'user' ? (
-                        <div className="hk-md">
-                          <ReactMarkdown>{msg.content}</ReactMarkdown>
+                  )}
+
+                  {messages.map((msg, index) => {
+                    const isLastMsg = index === messages.length - 1;
+                    const isStreaming = loading && isLastMsg && msg.role === 'ai';
+                    return (
+                      <div key={index} className={`hk-msg-wrap ${msg.role}`}>
+                        <div className={`hk-avatar ${msg.role}`}>
+                          {msg.role === 'ai' ? Icon.boltPurple : Icon.user}
                         </div>
-                      ) : renderMessageContent(msg.content, index, isStreaming)}
-                    </div>
-                  </div>
-                );
-              })}
+                        <div className={`hk-bubble ${msg.role}`}>
+                          {msg.role === 'user' ? (
+                            <div className="hk-md">
+                              <ReactMarkdown>{msg.content}</ReactMarkdown>
+                            </div>
+                          ) : renderMessageContent(msg.content, index, isStreaming)}
+                        </div>
+                      </div>
+                    );
+                  })}
 
-              <div ref={messagesEndRef} />
-            </div>
-          </div>
-
-          {/* Input */}
-          <div className="hk-input-area">
-            <div className="hk-input-inner">
-              {attachedImage && (
-                <div className="hk-img-preview">
-                  <img src={attachedImage} alt="Attachment" />
-                  <button className="hk-remove-img" onClick={() => setAttachedImage(null)} title="Remove">×</button>
+                  <div ref={messagesEndRef} />
                 </div>
-              )}
-
-              <div className="hk-input-box">
-                <input
-                  type="file" id="image-upload" accept="image/*"
-                  style={{ display: 'none' }} onChange={handleImageAttach}
-                />
-                <button
-                  className="hk-attach"
-                  onClick={() => document.getElementById('image-upload').click()}
-                  title="Attach image"
-                >
-                  {Icon.image}
-                </button>
-
-                <textarea
-                  ref={textareaRef}
-                  className="hk-textarea"
-                  rows={1}
-                  value={question}
-                  onChange={e => { setQuestion(e.target.value); adjustHeight(); }}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      if (canSend) handleAsk();
-                    }
-                  }}
-                  placeholder={
-                    activeSession
-                      ? 'Ask a question… (Shift+Enter for new line)'
-                      : 'Select or create a chat to begin…'
-                  }
-                  disabled={!activeSession}
-                />
-
-                <button
-                  className={`hk-send${!canSend ? ' idle' : ''}`}
-                  onClick={() => handleAsk()}
-                  disabled={!canSend}
-                  title="Send (Enter)"
-                >
-                  {loading ? Icon.spinner : <>{Icon.send} Send</>}
-                </button>
               </div>
-            </div>
-          </div>
+
+              {/* Input */}
+              <div className="hk-input-area">
+                <div className="hk-input-inner">
+                  {attachedImage && (
+                    <div className="hk-img-preview">
+                      <img src={attachedImage} alt="Attachment" />
+                      <button className="hk-remove-img" onClick={() => setAttachedImage(null)} title="Remove">×</button>
+                    </div>
+                  )}
+
+                  <div className="hk-input-box">
+                    <input
+                      type="file" id="image-upload" accept="image/*"
+                      style={{ display: 'none' }} onChange={handleImageAttach}
+                    />
+                    <button
+                      className="hk-attach"
+                      onClick={() => document.getElementById('image-upload').click()}
+                      title="Attach image"
+                    >
+                      {Icon.image}
+                    </button>
+
+                    <textarea
+                      ref={textareaRef}
+                      className="hk-textarea"
+                      rows={1}
+                      value={question}
+                      onChange={e => { setQuestion(e.target.value); adjustHeight(); }}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          if (canSend) handleAsk();
+                        }
+                      }}
+                      placeholder={
+                        activeSession
+                          ? 'Ask a question… (Shift+Enter for new line)'
+                          : 'Select or create a chat to begin…'
+                      }
+                      disabled={!activeSession}
+                    />
+
+                    <button
+                      className={`hk-send${!canSend ? ' idle' : ''}`}
+                      onClick={() => handleAsk()}
+                      disabled={!canSend}
+                      title="Send (Enter)"
+                    >
+                      {loading ? Icon.spinner : <>{Icon.send} Send</>}
+                    </button>
+                  </div>
+                </div>
+              </div>
 
             </div>{/* end .hk-chat-col */}
 
@@ -948,8 +991,8 @@ function ChatBox() {
                 <>
                   <div className="hk-pdf-header">
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--accent-light)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                      <polyline points="14 2 14 8 20 8"/>
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                      <polyline points="14 2 14 8 20 8" />
                     </svg>
                     <span className="hk-pdf-header-title">
                       {activeSession?.document_filename}
@@ -963,8 +1006,8 @@ function ChatBox() {
                   </div>
                   <div className="hk-pdf-iframe-wrap">
                     <iframe
-                      key={`${activePdfUrl}#page=${activePage}`}
-                      src={`${activePdfUrl}#page=${activePage}`}
+                      key={activePdfUrl}
+                      src={`${activePdfUrl}#page=${activePage}${searchQuery ? `&search=${encodeURIComponent(searchQuery)}` : ''}`}
                       title={`${activeSession?.document_filename} — Page ${activePage}`}
                     />
                   </div>

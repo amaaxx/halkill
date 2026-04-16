@@ -135,9 +135,9 @@ async def ask_question_stream(query: str, history: list, username: str, filename
     if not filename:
         sys_p = "Helpful AI. History: {history}"
     elif strict_mode:
-        sys_p = "Strict Assistant. Answer ONLY using context. Cite: `[Pg. X]`. End with [CONFIDENCE: HIGH/MED/LOW]. Context: {context} \nHistory: {history}"
+        sys_p = "Strict Assistant. Answer ONLY using context. You MUST cite sources using the exact System Page provided in the headers (e.g. `--- [Pg. 37] ---`). Ignore printed page numbers inside the text itself. Format: `[Pg. 37](#page=37&search=keyword)` where keyword is a unique 1-2 word phrase. End with [CONFIDENCE: HIGH/MED/LOW]. Context: {context} \nHistory: {history}"
     else:
-        sys_p = "Hybrid AI. Use context primarily. Cite: `[Pg. X]`. OK to use general knowledge if clear. End with [CONFIDENCE: HIGH/MED/EXT]. Context: {context} \nHistory: {history}"
+        sys_p = "Hybrid AI. Use context primarily. You MUST cite sources using the exact System Page provided in the headers (e.g. `--- [Pg. 37] ---`). Ignore printed page numbers inside the text itself. Format: `[Pg. 37](#page=37&search=keyword)` where keyword is a unique 1-2 word phrase. OK to use general knowledge. End with [CONFIDENCE: HIGH/MED/EXT]. Context: {context} \nHistory: {history}"
 
     formatted_sys = sys_p.format(history=formatted_history, context=context_text)
 
@@ -184,6 +184,10 @@ def add_document_to_vector_store(file_path: str, username: str, filename: str):
     if ext == ".pdf":
         loader = PyMuPDFLoader(file_path)
         docs = loader.load()
+        # Enforce 1-indexed Physical Pages (PyMuPDF outputs 0-indexed by default)
+        for doc in docs:
+            if "page" in doc.metadata:
+                doc.metadata["page"] += 1
     elif ext in [".txt", ".md"]:
         loader = TextLoader(file_path, encoding="utf-8")
         docs = loader.load()
