@@ -488,7 +488,9 @@ function ChatBox() {
 
     // PRE-PROCESSOR 1: Fix spaces in AI-generated URLs so ReactMarkdown doesn't break
     text = text.replace(/\[([^\]]+)\]\((#page=\d+&search=)([^)]+)\)/g, (match, label, prefix, searchTerms) => {
-      return `[${label}](${prefix}${encodeURIComponent(searchTerms)})`;
+      let safeSearch = searchTerms;
+      try { safeSearch = decodeURIComponent(searchTerms); } catch(e) {}
+      return `[${label}](${prefix}${encodeURIComponent(safeSearch)})`;
     });
 
     // PRE-PROCESSOR 2: Convert bare [Pg. X] or [Page X] into links if AI forgets the search param entirely
@@ -598,7 +600,7 @@ function ChatBox() {
     })();
   }, []); // eslint-disable-line
 
-  // Fetch PDF URL and convert to Same-Origin Blob to bypass Chrome XS-Search blocks
+  // Load standard Remote URL (Chrome's builtin PDF Viewer strictly disables "#search" over "blob:" URLs)
   useEffect(() => {
     const filename = activeSession?.document_filename;
     if (!filename || !filename.toLowerCase().endsWith('.pdf')) {
@@ -608,36 +610,20 @@ function ChatBox() {
     }
 
     let cancelled = false;
-    let blobUrl = null;
 
-    const loadPdfBlob = async () => {
+    const loadPdfUrl = async () => {
       try {
-        // 1. Get the remote URL (Render or Supabase)
         const url = await fetchDocumentUrl(filename);
-
-        // 2. Fetch the actual file bytes via AJAX
-        // (This works perfectly because we already added Vercel to your backend CORS!)
-        const response = await fetch(url);
-        if (!response.ok) throw new Error("Failed to fetch PDF");
-
-        // 3. Convert to a local Same-Origin URL
-        const blob = await response.blob();
-        blobUrl = URL.createObjectURL(blob);
-
-        if (!cancelled) setActivePdfUrl(blobUrl);
+        if (!cancelled) setActivePdfUrl(url);
       } catch (err) {
-        console.error("PDF Blob Error:", err);
+        console.error("PDF Fetch Error:", err);
         if (!cancelled) setActivePdfUrl(null);
       }
     };
 
-    loadPdfBlob();
+    loadPdfUrl();
 
-    return () => {
-      cancelled = true;
-      // Clean up memory when the chat changes
-      if (blobUrl) URL.revokeObjectURL(blobUrl);
-    };
+    return () => { cancelled = true; };
   }, [activeSession?.id]); // eslint-disable-line
 
   useEffect(() => {
