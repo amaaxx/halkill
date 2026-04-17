@@ -294,7 +294,17 @@ function ChatBox() {
         (chunk) => setMessages(prev => {
           const arr = [...prev];
           const last = arr.length - 1;
-          arr[last] = { ...arr[last], content: arr[last].content + chunk };
+
+          // Catch the metadata packet for Hybrid Search
+          if (chunk.startsWith("METADATA_SOURCES:")) {
+            const parts = chunk.split("|||");
+            const meta = parts[0];
+            const rest = parts.slice(1).join("|||");
+            const sources = JSON.parse(meta.replace("METADATA_SOURCES:", ""));
+            arr[last] = { ...arr[last], sources: sources, content: rest || "" };
+          } else {
+            arr[last] = { ...arr[last], content: arr[last].content + chunk };
+          }
           return arr;
         }),
         activeSession.document_filename, activeSession.id, isStrict, imgSnap,
@@ -449,6 +459,26 @@ function ChatBox() {
               {badge}
             </span>
           </div>
+        )}
+
+        {/* ── METADATA SOURCES DROPDOWN ── */}
+        {msgIndex !== undefined && messages[msgIndex]?.sources && messages[msgIndex].sources.length > 0 && (
+          <details className="hk-sources-dropdown" style={{ marginBottom: 10, fontSize: '0.85rem', background: 'var(--surface-light)', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)' }}>
+            <summary style={{ cursor: 'pointer', color: 'var(--text-dim)', fontWeight: 500 }}>
+              View {messages[msgIndex].sources.length} Context Chunks
+            </summary>
+            <div className="hk-sources-list" style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {messages[msgIndex].sources.map((s, i) => (
+                <div key={i} className="hk-source-item" style={{ background: 'var(--surface)', padding: 10, borderRadius: 6, border: '1px solid var(--border)' }}>
+                  <div className="hk-source-meta" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, color: 'var(--accent-light)', fontSize: '0.75rem', fontWeight: 600 }}>
+                    <span>Pg. {s.page}</span>
+                    <span>Match: {(s.score * 100).toFixed(1)}%</span>
+                  </div>
+                  <p className="hk-source-snippet" style={{ margin: 0, color: 'var(--text-dim)', lineHeight: 1.4 }}>{s.snippet}</p>
+                </div>
+              ))}
+            </div>
+          </details>
         )}
 
         {isEmpty ? (
@@ -902,7 +932,7 @@ function ChatBox() {
 
             </div>
 
-            {/* ── RESTORED: Native Iframe PDF Pane ── */}
+            {/* ── Native Iframe PDF Pane ── */}
             <div className={`hk-pdf-pane${pdfVisible && activePdfUrl ? ' open' : ''}`}>
               {activePdfUrl && pdfVisible && (
                 <>

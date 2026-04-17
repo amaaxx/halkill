@@ -111,11 +111,8 @@ async def ask_question_stream(query: str, history: list, username: str, filename
         # HYBRID RETRIEVER + RECIPROCAL RANK FUSION (RRF)
         # ---------------------------------------------------------
         try:
-            # 1. Turn the user's question into a math vector for semantic search
             query_embedding = get_embeddings().embed_query(query)
             
-            # 2. Call the Hybrid Search SQL function
-            # This passes both the raw text (for keyword) and vector (for semantic)
             response = supabase.rpc("hybrid_search", {
                 "query_text": query,               
                 "query_embedding": query_embedding, 
@@ -123,14 +120,26 @@ async def ask_question_stream(query: str, history: list, username: str, filename
                 "filter": filter_dict
             }).execute()
             
-            # 3. Format the returned rows into our Prompt Context
+            # 1. Capture the chunks and scores for the frontend
+            retrieved_sources = []
             context_entries = []
             for row in response.data:
+                score = round(row.get("similarity", 0), 3)
                 page = row.get("metadata", {}).get("page", "N/A")
                 content = row.get("content", "")
+                
+                retrieved_sources.append({
+                    "page": page,
+                    "score": score,
+                    "snippet": content[:200] + "..." # Send a small preview
+                })
                 context_entries.append(f"--- [Pg. {page}] ---\n{content}")
                 
             context_text = "\n\n".join(context_entries)
+            
+            # 2. Send the sources as a special "metadata" chunk before the AI response
+            import json
+            yield f"METADATA_SOURCES:{json.dumps(retrieved_sources)}|||"
             
         except Exception as e:
             logger.error(f"Hybrid Retrieval Error: {str(e)}")
