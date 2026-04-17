@@ -107,14 +107,18 @@ async def ask_question_stream(query: str, history: list, username: str, filename
         # ---------------------------------------------------------
         # THE CUSTOM RETRIEVER (Bypassing LangChain's broken wrapper)
         # ---------------------------------------------------------
+        # ---------------------------------------------------------
+        # HYBRID RETRIEVER + RECIPROCAL RANK FUSION (RRF)
+        # ---------------------------------------------------------
         try:
-            # 1. Turn the user's question into a math vector
+            # 1. Turn the user's question into a math vector for semantic search
             query_embedding = get_embeddings().embed_query(query)
             
-            # 2. Call your raw SQL function directly inside Supabase
-            response = supabase.rpc("match_vecs", {
-                "query_embedding": query_embedding,
-                "match_threshold": 0.0, 
+            # 2. Call the Hybrid Search SQL function
+            # This passes both the raw text (for keyword) and vector (for semantic)
+            response = supabase.rpc("hybrid_search", {
+                "query_text": query,               
+                "query_embedding": query_embedding, 
                 "match_count": k_val,
                 "filter": filter_dict
             }).execute()
@@ -129,7 +133,7 @@ async def ask_question_stream(query: str, history: list, username: str, filename
             context_text = "\n\n".join(context_entries)
             
         except Exception as e:
-            logger.error(f"Custom Retrieval Error: {str(e)}")
+            logger.error(f"Hybrid Retrieval Error: {str(e)}")
             context_text = "I could not retrieve the document data due to a database error."
 
     if not filename:
