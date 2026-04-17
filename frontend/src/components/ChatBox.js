@@ -2,8 +2,16 @@ import ReactMarkdown from "react-markdown";
 import ReactDOM from 'react-dom';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import { useState, useRef, useEffect, useContext, useCallback } from "react";
+import { useState, useRef, useEffect, useContext, useCallback, useMemo } from "react";
 import { AuthContext } from "../AuthContext";
+
+import { Worker, Viewer } from '@react-pdf-viewer/core';
+import { defaultLayoutPlugin } from '@react-pdf-viewer/default-layout';
+import { searchPlugin } from '@react-pdf-viewer/search';
+import { pageNavigationPlugin } from '@react-pdf-viewer/page-navigation';
+import '@react-pdf-viewer/core/lib/styles/index.css';
+import '@react-pdf-viewer/default-layout/lib/styles/index.css';
+import '@react-pdf-viewer/search/lib/styles/index.css';
 import {
   askQuestionStream, uploadDocument, fetchUserLibrary, fetchUserChats,
   createChatSession, fetchChatHistory, renameChatSession, deleteChatSession, deleteDocument,
@@ -222,6 +230,39 @@ function ChatBox() {
   // ── Refs ──────────────────────────────────────────
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
+
+  // ── React PDF Viewer Plugins ──────────────────────
+  const pdfPlugins = useMemo(() => {
+    const searchOptions = searchPlugin();
+    const navOptions = pageNavigationPlugin();
+    const layoutOptions = defaultLayoutPlugin();
+    return { searchOptions, navOptions, layoutOptions };
+  }, []);
+
+  // ── React PDF Viewer Event Binding ────────────────
+  const handleDocumentLoad = (e) => {
+    if (activePage > 0) {
+      try { pdfPlugins.navOptions.jumpToPage(activePage - 1); } catch (e) {}
+    }
+    if (searchQuery) {
+      try { pdfPlugins.searchOptions.highlight({ keyword: searchQuery, matchCase: false }); } catch (e) {}
+    }
+  };
+
+  useEffect(() => {
+    if (!pdfVisible || !activePdfUrl || !pdfPlugins) return;
+    try {
+      pdfPlugins.navOptions.jumpToPage(Math.max(activePage - 1, 0));
+    } catch (e) {}
+
+    if (searchQuery) {
+      try {
+        pdfPlugins.searchOptions.highlight({ keyword: searchQuery, matchCase: false });
+      } catch (e) {}
+    } else {
+      try { pdfPlugins.searchOptions.clearHighlights(); } catch (e) {}
+    }
+  }, [activePage, searchQuery, activePdfUrl, pdfVisible, pdfPlugins]);
 
   /* ── Helpers ─────────────────────────────────────── */
   const showToast = useCallback((message, type = 'info', ms = 3500) => {
@@ -999,11 +1040,14 @@ function ChatBox() {
                     >✕</button>
                   </div>
                   <div className="hk-pdf-iframe-wrap">
-                    <iframe
-                      key={`${activePdfUrl}#page=${activePage}${searchQuery}`}
-                      src={`${activePdfUrl}#page=${activePage}&view=FitH${searchQuery ? `&search=${encodeURIComponent(searchQuery)}` : ''}`}
-                      title={`${activeSession?.document_filename} — Page ${activePage}`}
-                    />
+                    <Worker workerUrl="https://unpkg.com/pdfjs-dist@3.4.120/build/pdf.worker.min.js">
+                      <Viewer
+                        fileUrl={activePdfUrl}
+                        plugins={[pdfPlugins.layoutOptions, pdfPlugins.searchOptions, pdfPlugins.navOptions]}
+                        initialPage={Math.max(activePage - 1, 0)}
+                        onDocumentLoad={handleDocumentLoad}
+                      />
+                    </Worker>
                   </div>
                 </>
               )}
