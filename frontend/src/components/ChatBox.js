@@ -2,16 +2,8 @@ import ReactMarkdown from "react-markdown";
 import ReactDOM from 'react-dom';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import { useState, useRef, useEffect, useContext, useCallback, useMemo } from "react";
+import { useState, useRef, useEffect, useContext, useCallback } from "react";
 import { AuthContext } from "../AuthContext";
-
-import { Worker, Viewer } from '@react-pdf-viewer/core';
-import { defaultLayoutPlugin } from '@react-pdf-viewer/default-layout';
-import { searchPlugin } from '@react-pdf-viewer/search';
-import { pageNavigationPlugin } from '@react-pdf-viewer/page-navigation';
-import '@react-pdf-viewer/core/lib/styles/index.css';
-import '@react-pdf-viewer/default-layout/lib/styles/index.css';
-import '@react-pdf-viewer/search/lib/styles/index.css';
 import {
   askQuestionStream, uploadDocument, fetchUserLibrary, fetchUserChats,
   createChatSession, fetchChatHistory, renameChatSession, deleteChatSession, deleteDocument,
@@ -106,88 +98,21 @@ function Dialog({ dialog, onClose }) {
    SVG icon helpers
    ══════════════════════════════════════════════════ */
 const Icon = {
-  bolt: (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-    </svg>
-  ),
-  boltPurple: (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#a89fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-    </svg>
-  ),
-  user: (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.45)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-      <circle cx="12" cy="7" r="4" />
-    </svg>
-  ),
-  menu: (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
-    </svg>
-  ),
-  plus: (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
-    </svg>
-  ),
-  send: (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" />
-    </svg>
-  ),
-  image: (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" />
-    </svg>
-  ),
-  doc: (
-    <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" />
-    </svg>
-  ),
-  edit: (
-    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-    </svg>
-  ),
-  trash: (
-    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-    </svg>
-  ),
-  clip: (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-    </svg>
-  ),
-  logout: (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-      <polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" />
-    </svg>
-  ),
-  check: (
-    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="20 6 9 17 4 12" />
-    </svg>
-  ),
-  copy: (
-    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="9" y="9" width="13" height="13" rx="2" />
-      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-    </svg>
-  ),
-  spinner: (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin .8s linear infinite' }}>
-      <line x1="12" y1="2" x2="12" y2="6" /><line x1="12" y1="18" x2="12" y2="22" />
-      <line x1="4.93" y1="4.93" x2="7.76" y2="7.76" /><line x1="16.24" y1="16.24" x2="19.07" y2="19.07" />
-      <line x1="2" y1="12" x2="6" y2="12" /><line x1="18" y1="12" x2="22" y2="12" />
-      <line x1="4.93" y1="19.07" x2="7.76" y2="16.24" /><line x1="16.24" y1="7.76" x2="19.07" y2="4.93" />
-    </svg>
-  ),
+  bolt: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></svg>,
+  boltPurple: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#a89fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></svg>,
+  user: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.45)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>,
+  menu: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" /></svg>,
+  plus: <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>,
+  send: <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg>,
+  image: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" /></svg>,
+  doc: <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>,
+  edit: <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>,
+  trash: <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /></svg>,
+  clip: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" /></svg>,
+  logout: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg>,
+  check: <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>,
+  copy: <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>,
+  spinner: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin .8s linear infinite' }}><line x1="12" y1="2" x2="12" y2="6" /><line x1="12" y1="18" x2="12" y2="22" /><line x1="4.93" y1="4.93" x2="7.76" y2="7.76" /><line x1="16.24" y1="16.24" x2="19.07" y2="19.07" /><line x1="2" y1="12" x2="6" y2="12" /><line x1="18" y1="12" x2="22" y2="12" /><line x1="4.93" y1="19.07" x2="7.76" y2="16.24" /><line x1="16.24" y1="7.76" x2="19.07" y2="4.93" /></svg>,
 };
 
 /* ══════════════════════════════════════════════════
@@ -221,7 +146,6 @@ function ChatBox() {
   const [pdfVisible, setPdfVisible] = useState(false);
   const [activePdfUrl, setActivePdfUrl] = useState(null);
   const [activePage, setActivePage] = useState(1);
-  const [searchQuery, setSearchQuery] = useState("");
 
   // ── Toast + dialog ────────────────────────────────
   const [toasts, setToasts] = useState([]);
@@ -230,39 +154,6 @@ function ChatBox() {
   // ── Refs ──────────────────────────────────────────
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
-
-  // ── React PDF Viewer Plugins ──────────────────────
-  const pdfPlugins = useMemo(() => {
-    const searchOptions = searchPlugin();
-    const navOptions = pageNavigationPlugin();
-    const layoutOptions = defaultLayoutPlugin();
-    return { searchOptions, navOptions, layoutOptions };
-  }, []);
-
-  // ── React PDF Viewer Event Binding ────────────────
-  const handleDocumentLoad = (e) => {
-    if (activePage > 0) {
-      try { pdfPlugins.navOptions.jumpToPage(activePage - 1); } catch (e) {}
-    }
-    if (searchQuery) {
-      try { pdfPlugins.searchOptions.highlight({ keyword: searchQuery, matchCase: false }); } catch (e) {}
-    }
-  };
-
-  useEffect(() => {
-    if (!pdfVisible || !activePdfUrl || !pdfPlugins) return;
-    try {
-      pdfPlugins.navOptions.jumpToPage(Math.max(activePage - 1, 0));
-    } catch (e) {}
-
-    if (searchQuery) {
-      try {
-        pdfPlugins.searchOptions.highlight({ keyword: searchQuery, matchCase: false });
-      } catch (e) {}
-    } else {
-      try { pdfPlugins.searchOptions.clearHighlights(); } catch (e) {}
-    }
-  }, [activePage, searchQuery, activePdfUrl, pdfVisible, pdfPlugins]);
 
   /* ── Helpers ─────────────────────────────────────── */
   const showToast = useCallback((message, type = 'info', ms = 3500) => {
@@ -308,6 +199,20 @@ function ChatBox() {
       setTimeout(() => textareaRef.current?.focus(), 50);
     } catch {
       showToast('Failed to create new chat.', 'error');
+    }
+  }
+
+  /* ── Route Library Clicks ────────────────────────── */
+  async function handleLibraryClick(filename) {
+    // Look for an existing chat session that matches this file
+    const existingSession = chatSessions.find(s => s.document_filename === filename);
+
+    if (existingSession) {
+      // If found, open the existing chat
+      await handleSelectSession(existingSession);
+    } else {
+      // If not found, create a new one
+      await handleStartNewChat(filename);
     }
   }
 
@@ -498,10 +403,9 @@ function ChatBox() {
   };
 
   /* ── Open citation in PDF pane ───────────────────── */
-  const handleCitationClick = useCallback((page, search) => {
+  const handleCitationClick = useCallback((page) => {
     if (!activePdfUrl) return;
     setActivePage(page);
-    setSearchQuery(search || "");
     setPdfVisible(true);
   }, [activePdfUrl]);
 
@@ -519,22 +423,19 @@ function ChatBox() {
     // Normalise [Source: X, Page: N] → [Pg. N]
     text = text.replace(/\[Source: .*?, Page: (\d+)\]/g, '[Pg. $1]');
 
-    // PRE-PROCESSOR 0: Handle grouped AI citations like [Pg. 71, Pg. 17, Pg. 18] or [Pg. 71, 17]
-    // And convert them to individual links before markdown parsing.
+    // PRE-PROCESSOR 0: Handle grouped AI citations
     text = text.replace(/\[\s*(?:Pg\.?|Pages?|P\.?)\s*\d+(?:(?:,|\s+and\s+|\s*&\s*)\s*(?:Pg\.?|Pages?|P\.?)?\s*\d+)+\s*\]/gi, (match) => {
       const numbers = match.match(/\d+/g);
       if (!numbers) return match;
       return numbers.map(n => `[Pg. ${n}](#page=${n})`).join(', ');
     });
 
-    // PRE-PROCESSOR 1: Fix spaces in AI-generated URLs so ReactMarkdown doesn't break
-    text = text.replace(/\[([^\]]+)\]\((#page=\d+&search=)([^)]+)\)/g, (match, label, prefix, searchTerms) => {
-      let safeSearch = searchTerms;
-      try { safeSearch = decodeURIComponent(searchTerms); } catch(e) {}
-      return `[${label}](${prefix}${encodeURIComponent(safeSearch)})`;
+    // PRE-PROCESSOR 1: Filter out any stray search parameters so the markdown doesn't break
+    text = text.replace(/\[([^\]]+)\]\((#page=\d+)&search=[^)]+\)/g, (match, label, prefix) => {
+      return `[${label}](${prefix})`;
     });
 
-    // PRE-PROCESSOR 2: Convert bare [Pg. X] or [Page X] into links if AI forgets the search param entirely
+    // PRE-PROCESSOR 2: Convert bare [Pg. X] into clean links
     text = text.replace(/`?\[\s*(?:Pg\.?|Pages?|P\.?)\s*(\d+)\s*\]`?(?!\()/gi, '[Pg. $1](#page=$1)');
 
     const isEmpty = isStreaming && !text.trim();
@@ -556,18 +457,13 @@ function ChatBox() {
           <div className="hk-md">
             <ReactMarkdown
               components={{
-                // Citation pill via hash parameters
                 a({ href, children, ...props }) {
                   if (href && (href.startsWith('#page=') || href.startsWith('#page-'))) {
                     let page = 1;
-                    let search = "";
 
                     if (href.startsWith('#page=')) {
-                      // Safely extract parameters even if URL encoded
                       const params = new URLSearchParams(href.split('#')[1]);
                       page = parseInt(params.get('page'), 10);
-                      // Strip out any trailing/leading quotes the AI might have accidentally added
-                      search = (params.get('search') || "").replace(/(^"|"$)/g, '');
                     } else {
                       page = parseInt(href.replace('#page-', ''), 10);
                     }
@@ -576,7 +472,7 @@ function ChatBox() {
                     return (
                       <button
                         className={`hk-cite-pill${isActive ? ' active-cite' : ''}`}
-                        onClick={() => handleCitationClick(page, search)}
+                        onClick={() => handleCitationClick(page)}
                         title={`Open page ${page} in PDF viewer`}
                       >
                         <span className="hk-cite-pill-icon">
@@ -589,10 +485,8 @@ function ChatBox() {
                       </button>
                     );
                   }
-                  // Regular external link
                   return <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>;
                 },
-                // Code blocks
                 code({ node, inline, className, children, ...props }) {
                   const match = /language-(\w+)/.exec(className || '');
                   return !inline && match ? (
@@ -641,7 +535,6 @@ function ChatBox() {
     })();
   }, []); // eslint-disable-line
 
-  // Load standard Remote URL (Chrome's builtin PDF Viewer strictly disables "#search" over "blob:" URLs)
   useEffect(() => {
     const filename = activeSession?.document_filename;
     if (!filename || !filename.toLowerCase().endsWith('.pdf')) {
@@ -657,7 +550,6 @@ function ChatBox() {
         const url = await fetchDocumentUrl(filename);
         if (!cancelled) setActivePdfUrl(url);
       } catch (err) {
-        console.error("PDF Fetch Error:", err);
         if (!cancelled) setActivePdfUrl(null);
       }
     };
@@ -705,7 +597,6 @@ function ChatBox() {
       <Toast toasts={toasts} onRemove={removeToast} />
       <Dialog dialog={dialog} onClose={closeDialog} />
 
-      {/* ── Context menu portal (renders outside overflow clipping) ── */}
       {activeMenu && menuBtnRect && ReactDOM.createPortal(
         <div
           className="hk-dropdown"
@@ -746,7 +637,6 @@ function ChatBox() {
             <kbd className="hk-kbd">⌃K</kbd>
           </button>
 
-          {/* Recent chats */}
           <div className="hk-sb-chats">
             <p className="hk-sb-section">Recent Chats</p>
             <div className="hk-sb-list">
@@ -777,7 +667,6 @@ function ChatBox() {
             </div>
           </div>
 
-          {/* Library */}
           <div className="hk-sb-library">
             <p className="hk-sb-section">My Library</p>
             <div className="hk-sb-list">
@@ -785,7 +674,7 @@ function ChatBox() {
                 <button
                   key={`f-${idx}`}
                   className="hk-sb-item"
-                  onClick={() => handleStartNewChat(file)}
+                  onClick={() => handleLibraryClick(file)}
                 >
                   <span className="hk-sb-item-text">
                     <span style={{ marginRight: 7, opacity: .6, fontSize: '.77rem' }}>{getFileIcon(file)}</span>
@@ -801,7 +690,6 @@ function ChatBox() {
             </div>
           </div>
 
-          {/* Upload */}
           <div className="hk-sb-upload">
             <input
               type="file" id="file-upload"
@@ -825,7 +713,6 @@ function ChatBox() {
         {/* ── Main ──────────────────────────────────── */}
         <div className="hk-main">
 
-          {/* Drag overlay */}
           {isDragging && (
             <div className="hk-drop-overlay">
               <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#a89fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -836,7 +723,6 @@ function ChatBox() {
             </div>
           )}
 
-          {/* Topbar */}
           <div className="hk-topbar">
             <button
               className="hk-collapse-btn"
@@ -891,12 +777,9 @@ function ChatBox() {
             </div>
           </div>
 
-          {/* Content split: chat + PDF pane */}
           <div className="hk-content-split">
-            {/* ── Chat column ── */}
             <div className="hk-chat-col">
 
-              {/* Messages */}
               <div className="hk-messages">
                 <div className="hk-messages-inner">
 
@@ -963,7 +846,6 @@ function ChatBox() {
                 </div>
               </div>
 
-              {/* Input */}
               <div className="hk-input-area">
                 <div className="hk-input-inner">
                   {attachedImage && (
@@ -1018,9 +900,9 @@ function ChatBox() {
                 </div>
               </div>
 
-            </div>{/* end .hk-chat-col */}
+            </div>
 
-            {/* ── PDF Pane ── */}
+            {/* ── RESTORED: Native Iframe PDF Pane ── */}
             <div className={`hk-pdf-pane${pdfVisible && activePdfUrl ? ' open' : ''}`}>
               {activePdfUrl && pdfVisible && (
                 <>
@@ -1040,21 +922,17 @@ function ChatBox() {
                     >✕</button>
                   </div>
                   <div className="hk-pdf-iframe-wrap">
-                    <Worker workerUrl="https://unpkg.com/pdfjs-dist@3.4.120/build/pdf.worker.min.js">
-                      <Viewer
-                        fileUrl={activePdfUrl}
-                        plugins={[pdfPlugins.layoutOptions, pdfPlugins.searchOptions, pdfPlugins.navOptions]}
-                        initialPage={Math.max(activePage - 1, 0)}
-                        onDocumentLoad={handleDocumentLoad}
-                      />
-                    </Worker>
+                    <iframe
+                      key={`${activePdfUrl}#page=${activePage}`}
+                      src={`${activePdfUrl}#page=${activePage}`}
+                      title={`${activeSession?.document_filename} — Page ${activePage}`}
+                    />
                   </div>
                 </>
               )}
             </div>
 
-          </div>{/* end .hk-content-split */}
-
+          </div>
         </div>
       </div>
     </>
