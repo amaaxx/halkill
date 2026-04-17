@@ -1022,7 +1022,7 @@ function ChatBox() {
 
             {/* ── PDF Pane ── */}
             <div className={`hk-pdf-pane${pdfVisible && activePdfUrl ? ' open' : ''}`}>
-              {activePdfUrl && (
+              {activePdfUrl && pdfVisible && (
                 <>
                   <div className="hk-pdf-header">
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--accent-light)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
