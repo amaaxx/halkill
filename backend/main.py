@@ -8,7 +8,13 @@ import uuid
 
 from database import engine, get_db
 import models, schemas, security
-from rag import ask_question_stream, add_document_to_vector_store, supabase as rag_supabase
+from rag import ask_question_stream
+from dependencies import get_supabase
+from worker import process_and_cleanup_document_task
+
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from logger import get_logger
 
 from fastapi import Depends, status
@@ -16,11 +22,16 @@ from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from jose import JWTError, jwt
 
-models.Base.metadata.create_all(bind=engine)
+# Alembic handles database migrations now
+# models.Base.metadata.create_all(bind=engine)
 
 logger = get_logger(__name__)
 
 app = FastAPI()
+
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 origins = [
     "http://localhost:3000",
@@ -67,10 +78,13 @@ async def add_request_id(request: Request, call_next):
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
+    if isinstance(exc, HTTPException):
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    
     request_id = getattr(request.state, "request_id", "unknown")
     logger.error(f"[{request_id}] Unhandled error", exc_info=True)
     return JSONResponse(status_code=500, content={"success": False, "error": {"message": "Internal server error"}})
-
 @app.post("/register", response_model=schemas.UserResponse)
 def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
     existing_user = db.query(models.User).filter(models.User.username == user.username).first()
@@ -113,12 +127,13 @@ def get_user_chats(current_user: models.User = Depends(get_current_user), db: Se
     return db.query(models.ChatSession).filter(models.ChatSession.owner_id == current_user.id).order_by(models.ChatSession.created_at.desc()).all()
 
 @app.get("/chats/{session_id}/messages", response_model=List[schemas.MessageResponse])
-def get_chat_history(session_id: int, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+def get_chat_history(session_id: int, skip: int = 0, limit: int = 50, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     session = db.query(models.ChatSession).filter(models.ChatSession.id == session_id, models.ChatSession.owner_id == current_user.id).first()
     if not session: raise HTTPException(status_code=404)
-    return db.query(models.ChatMessage).filter(models.ChatMessage.session_id == session_id).order_by(models.ChatMessage.created_at.asc()).all()
+    return db.query(models.ChatMessage).filter(models.ChatMessage.session_id == session_id).order_by(models.ChatMessage.created_at.asc()).offset(skip).limit(limit).all()
 
 @app.post("/ask")
+@limiter.limit("20/minute")
 async def ask(q: schemas.Question, request: Request, current_user: models.User = Depends(get_current_user)):
     if not q.session_id: raise HTTPException(status_code=400, detail="session_id required")
     return StreamingResponse(
@@ -148,45 +163,59 @@ def delete_chat(session_id: int, current_user: models.User = Depends(get_current
     return {"success": True}
 
 @app.get("/documents/{filename}/url")
-def get_document_url(filename: str, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+def get_document_url(filename: str, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db), supabase = Depends(get_supabase)):
     doc = db.query(models.Document).filter(models.Document.filename == filename, models.Document.owner_id == current_user.id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     storage_path = f"{current_user.username}/{filename}"
     try:
-        result = rag_supabase.storage.from_("halkill_documents").get_public_url(storage_path)
+        result = supabase.storage.from_("halkill_documents").get_public_url(storage_path)
         return {"url": result}
     except Exception as e:
         logger.error(f"Failed to get public URL for {storage_path}: {str(e)}")
         raise HTTPException(status_code=500, detail="Could not retrieve document URL")
 
 @app.delete("/documents/{filename}")
-def delete_document(filename: str, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+def delete_document(filename: str, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db), supabase = Depends(get_supabase)):
     docs = db.query(models.Document).filter(models.Document.filename == filename, models.Document.owner_id == current_user.id).all()
     for doc in docs: db.delete(doc)
     db.commit()
     # Also delete from Supabase Storage
     storage_path = f"{current_user.username}/{filename}"
     try:
-        rag_supabase.storage.from_("halkill_documents").remove([storage_path])
+        supabase.storage.from_("halkill_documents").remove([storage_path])
     except Exception as e:
         logger.warning(f"Could not remove file from storage: {str(e)}")
+        
+    # Purge orphaned vector chunks
+    try:
+        supabase.table("langchain_vecs").delete().contains("metadata", {"username": current_user.username, "source": filename}).execute()
+    except Exception as e:
+        logger.warning(f"Could not remove vector chunks from database: {str(e)}")
+        
     return {"success": True}
 
 @app.post("/upload")
+@limiter.limit("5/minute")
 async def upload_document(
-    background_tasks: BackgroundTasks, 
+    request: Request,
     file: UploadFile = File(...), 
     current_user: models.User = Depends(get_current_user), 
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    supabase = Depends(get_supabase)
 ):
+    # Prevent Duplicate Uploads
+    existing_doc = db.query(models.Document).filter(models.Document.filename == file.filename, models.Document.owner_id == current_user.id).first()
+    if existing_doc:
+        raise HTTPException(status_code=400, detail="A document with this name already exists. Please rename or delete the old one first.")
+
     # Create Ephemeral Temp Directory (Safe for Render)
     os.makedirs("/tmp/halkill_data", exist_ok=True)
     file_path = os.path.join("/tmp/halkill_data", file.filename)
 
-    file_bytes = await file.read()
+    import shutil
     with open(file_path, "wb") as buffer:
-        buffer.write(file_bytes)
+        shutil.copyfileobj(file.file, buffer)
 
     new_doc = models.Document(filename=file.filename, owner_id=current_user.id)
     db.add(new_doc)
@@ -195,23 +224,18 @@ async def upload_document(
     # Upload raw file to Supabase Storage for frontend PDF viewer
     storage_path = f"{current_user.username}/{file.filename}"
     try:
-        rag_supabase.storage.from_("halkill_documents").upload(
-            path=storage_path,
-            file=file_bytes,
-            file_options={"content-type": file.content_type or "application/octet-stream", "upsert": "true"}
-        )
+        with open(file_path, "rb") as f:
+            supabase.storage.from_("halkill_documents").upload(
+                path=storage_path,
+                file=f,
+                file_options={"content-type": file.content_type or "application/octet-stream", "upsert": "true"}
+            )
         logger.info(f"Uploaded '{file.filename}' to Supabase Storage at '{storage_path}'")
     except Exception as e:
         logger.warning(f"Could not upload file to Supabase Storage: {str(e)}")
 
-    # Offload the heavy embedding generation to a native FastAPI background task
-    # This prevents the request from hanging and hitting Render's 100-second timeout limit
-    background_tasks.add_task(
-        process_and_cleanup_document,
-        file_path,
-        current_user.username,
-        file.filename
-    )
+    # Offload the heavy embedding generation to a Celery background task
+    process_and_cleanup_document_task.delay(file_path, current_user.username, file.filename)
 
     return {"success": True, "filename": file.filename}
 

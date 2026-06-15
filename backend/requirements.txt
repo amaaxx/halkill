@@ -21,5 +21,9 @@ uvicorn==0.41.0
 # --- LET PIP RESOLVE THESE AUTOMATICALLY ---
 google-genai
 supabase
+psycopg2-binary
+alembic
+celery
+redis
+slowapi
 gunicorn==21.2.0
-pg8000

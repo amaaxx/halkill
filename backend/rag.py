@@ -26,8 +26,7 @@ SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 if not all([GOOGLE_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_KEY]):
     raise ValueError("Missing critical environment variables.")
 
-# Initialize Supabase Client
-supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+# Supabase client will be injected where needed
 
 llm = ChatGoogleGenerativeAI(
     model="gemini-2.5-flash-lite", 
@@ -81,7 +80,14 @@ def get_embeddings():
         GLOBAL_EMBEDDING = CloudEmbeddings()
     return GLOBAL_EMBEDDING
 
-async def ask_question_stream(query: str, history: list, username: str, filename: str, session_id: int, strict_mode: bool, image_data: str = None):
+async def ask_question_stream(query: str, history: list, username: str, filename: str, session_id: int, strict_mode: bool, image_data: str = None, supabase=None, embedder=None):
+    if not supabase:
+        from dependencies import get_supabase
+        supabase = get_supabase()
+    if not embedder:
+        from dependencies import get_embedding_model
+        embedder = get_embedding_model()
+        
     db_content = f"![Image]({image_data})\n\n{query}" if image_data else query
     db = SessionLocal()
     try:
@@ -111,7 +117,7 @@ async def ask_question_stream(query: str, history: list, username: str, filename
         # HYBRID RETRIEVER + RECIPROCAL RANK FUSION (RRF)
         # ---------------------------------------------------------
         try:
-            query_embedding = get_embeddings().embed_query(query)
+            query_embedding = embedder.embed_query(query)
             
             response = supabase.rpc("hybrid_search", {
                 "query_text": query,               
@@ -190,6 +196,10 @@ async def ask_question_stream(query: str, history: list, username: str, filename
 
 
 def add_document_to_vector_store(file_path: str, username: str, filename: str):
+    from dependencies import get_supabase, get_embedding_model
+    supabase = get_supabase()
+    embedder = get_embedding_model()
+    
     ext = os.path.splitext(filename)[1].lower()
     docs = []
     is_tabular = False
@@ -233,7 +243,6 @@ def add_document_to_vector_store(file_path: str, username: str, filename: str):
     # BATCH INSERTION TO CLOUD DB (raw insert to bypass supabase-py/LangChain incompatibility)
     # Small batches + delay to stay well under Gemini's 1500 RPM embedding quota
     batch_size = 20
-    embedder = get_embeddings()
 
     for i in range(0, len(chunks), batch_size):
         batch = chunks[i:i+batch_size]
