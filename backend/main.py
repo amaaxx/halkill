@@ -110,8 +110,14 @@ def home():
 
 @app.get("/documents")
 def get_user_documents(current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    docs = db.query(models.Document).filter(models.Document.owner_id == current_user.id).all()
-    return {"files": list(set([doc.filename for doc in docs]))}
+    docs = db.query(models.Document).filter(models.Document.owner_id == current_user.id).order_by(models.Document.id.desc()).all()
+    seen = set()
+    unique_filenames = []
+    for doc in docs:
+        if doc.filename not in seen:
+            seen.add(doc.filename)
+            unique_filenames.append(doc.filename)
+    return {"files": unique_filenames}
 
 @app.post("/chats", response_model=schemas.ChatSessionResponse)
 def create_chat_session(chat_req: schemas.ChatCreate, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -195,10 +201,40 @@ def delete_document(filename: str, current_user: models.User = Depends(get_curre
         
     return {"success": True}
 
+def upload_to_storage_and_trigger_celery(file_path: str, username: str, filename: str, content_type: str):
+    from dependencies import get_supabase
+    from logger import get_logger
+    import os
+    
+    logger = get_logger(__name__)
+    supabase = get_supabase()
+    
+    storage_path = f"{username}/{filename}"
+    try:
+        logger.info(f"Background task starting upload for {filename} to Supabase Storage...")
+        with open(file_path, "rb") as file_obj:
+            supabase.storage.from_("halkill_documents").upload(
+                path=storage_path,
+                file=file_obj,
+                file_options={"content-type": content_type, "upsert": "true"}
+            )
+        logger.info(f"Background task successfully uploaded '{filename}' to Supabase Storage.")
+        
+        # Trigger Celery task once raw file is safely in Supabase storage
+        process_and_cleanup_document_task.delay(username, filename)
+    except Exception as e:
+        logger.error(f"Background upload task failed for '{filename}': {str(e)}")
+    finally:
+        # Clean up ephemeral web process local disk space
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            logger.info(f"Background task cleaned up temporary file {file_path}")
+
 @app.post("/upload")
 @limiter.limit("5/minute")
 async def upload_documents(
     request: Request,
+    background_tasks: BackgroundTasks,
     file: Optional[UploadFile] = File(None),
     files: Optional[List[UploadFile]] = File(None), 
     current_user: models.User = Depends(get_current_user), 
@@ -239,21 +275,14 @@ async def upload_documents(
         db.add(new_doc)
         db.commit()
 
-        # Upload raw file to Supabase Storage for frontend PDF viewer
-        storage_path = f"{current_user.username}/{f.filename}"
-        try:
-            with open(file_path, "rb") as file_obj:
-                supabase.storage.from_("halkill_documents").upload(
-                    path=storage_path,
-                    file=file_obj,
-                    file_options={"content-type": f.content_type or "application/octet-stream", "upsert": "true"}
-                )
-            logger.info(f"Uploaded '{f.filename}' to Supabase Storage at '{storage_path}'")
-        except Exception as e:
-            logger.warning(f"Could not upload file to Supabase Storage: {str(e)}")
-
-        # Offload the heavy embedding generation to a Celery background task
-        process_and_cleanup_document_task.delay(file_path, current_user.username, f.filename)
+        # Offload BOTH storage upload and database embedding generation to background task
+        background_tasks.add_task(
+            upload_to_storage_and_trigger_celery,
+            file_path,
+            current_user.username,
+            f.filename,
+            f.content_type or "application/octet-stream"
+        )
         uploaded_filenames.append(f.filename)
 
     return {
