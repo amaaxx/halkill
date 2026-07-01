@@ -3,7 +3,7 @@ from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Backgroun
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 import uuid
 
 from database import engine, get_db
@@ -199,57 +199,68 @@ def delete_document(filename: str, current_user: models.User = Depends(get_curre
 @limiter.limit("5/minute")
 async def upload_documents(
     request: Request,
-    files: List[UploadFile] = File(...), 
+    file: Optional[UploadFile] = File(None),
+    files: Optional[List[UploadFile]] = File(None), 
     current_user: models.User = Depends(get_current_user), 
     db: Session = Depends(get_db),
     supabase = Depends(get_supabase)
 ):
-    if not files:
-        raise HTTPException(status_code=400, detail="No files provided.")
-    
-    if len(files) > 10:
+    all_files = []
+    if file:
+        all_files.append(file)
+    if files:
+        all_files.extend(files)
+        
+    if not all_files:
+        raise HTTPException(status_code=400, detail="No files uploaded.")
+        
+    if len(all_files) > 10:
         raise HTTPException(status_code=400, detail="Maximum 10 files allowed at once.")
 
     uploaded_filenames = []
     
     # Pre-check for duplicate uploads
-    for file in files:
-        existing_doc = db.query(models.Document).filter(models.Document.filename == file.filename, models.Document.owner_id == current_user.id).first()
+    for f in all_files:
+        existing_doc = db.query(models.Document).filter(models.Document.filename == f.filename, models.Document.owner_id == current_user.id).first()
         if existing_doc:
-            raise HTTPException(status_code=400, detail=f"A document with the name '{file.filename}' already exists. Please rename or delete it first.")
+            raise HTTPException(status_code=400, detail=f"A document with the name '{f.filename}' already exists. Please rename or delete it first.")
 
     # Create Ephemeral Temp Directory (Safe for Render)
     os.makedirs("/tmp/halkill_data", exist_ok=True)
     import shutil
 
-    for file in files:
-        file_path = os.path.join("/tmp/halkill_data", file.filename)
+    for f in all_files:
+        file_path = os.path.join("/tmp/halkill_data", f.filename)
 
         with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+            shutil.copyfileobj(f.file, buffer)
 
-        new_doc = models.Document(filename=file.filename, owner_id=current_user.id)
+        new_doc = models.Document(filename=f.filename, owner_id=current_user.id)
         db.add(new_doc)
         db.commit()
 
         # Upload raw file to Supabase Storage for frontend PDF viewer
-        storage_path = f"{current_user.username}/{file.filename}"
+        storage_path = f"{current_user.username}/{f.filename}"
         try:
-            with open(file_path, "rb") as f:
+            with open(file_path, "rb") as file_obj:
                 supabase.storage.from_("halkill_documents").upload(
                     path=storage_path,
-                    file=f,
-                    file_options={"content-type": file.content_type or "application/octet-stream", "upsert": "true"}
+                    file=file_obj,
+                    file_options={"content-type": f.content_type or "application/octet-stream", "upsert": "true"}
                 )
-            logger.info(f"Uploaded '{file.filename}' to Supabase Storage at '{storage_path}'")
+            logger.info(f"Uploaded '{f.filename}' to Supabase Storage at '{storage_path}'")
         except Exception as e:
             logger.warning(f"Could not upload file to Supabase Storage: {str(e)}")
 
         # Offload the heavy embedding generation to a Celery background task
-        process_and_cleanup_document_task.delay(file_path, current_user.username, file.filename)
-        uploaded_filenames.append(file.filename)
+        process_and_cleanup_document_task.delay(file_path, current_user.username, f.filename)
+        uploaded_filenames.append(f.filename)
 
-    return {"success": True, "filenames": uploaded_filenames}
+    return {
+        "success": True, 
+        "filename": uploaded_filenames[0] if uploaded_filenames else None,
+        "filenames": uploaded_filenames
+    }
 
 def process_and_cleanup_document(file_path: str, username: str, filename: str):
     """Executes the computationally heavy embedding extraction, then automatically cleans up."""
