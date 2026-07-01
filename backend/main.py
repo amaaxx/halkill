@@ -197,47 +197,59 @@ def delete_document(filename: str, current_user: models.User = Depends(get_curre
 
 @app.post("/upload")
 @limiter.limit("5/minute")
-async def upload_document(
+async def upload_documents(
     request: Request,
-    file: UploadFile = File(...), 
+    files: List[UploadFile] = File(...), 
     current_user: models.User = Depends(get_current_user), 
     db: Session = Depends(get_db),
     supabase = Depends(get_supabase)
 ):
-    # Prevent Duplicate Uploads
-    existing_doc = db.query(models.Document).filter(models.Document.filename == file.filename, models.Document.owner_id == current_user.id).first()
-    if existing_doc:
-        raise HTTPException(status_code=400, detail="A document with this name already exists. Please rename or delete the old one first.")
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided.")
+    
+    if len(files) > 10:
+        raise HTTPException(status_code=400, detail="Maximum 10 files allowed at once.")
+
+    uploaded_filenames = []
+    
+    # Pre-check for duplicate uploads
+    for file in files:
+        existing_doc = db.query(models.Document).filter(models.Document.filename == file.filename, models.Document.owner_id == current_user.id).first()
+        if existing_doc:
+            raise HTTPException(status_code=400, detail=f"A document with the name '{file.filename}' already exists. Please rename or delete it first.")
 
     # Create Ephemeral Temp Directory (Safe for Render)
     os.makedirs("/tmp/halkill_data", exist_ok=True)
-    file_path = os.path.join("/tmp/halkill_data", file.filename)
-
     import shutil
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
 
-    new_doc = models.Document(filename=file.filename, owner_id=current_user.id)
-    db.add(new_doc)
-    db.commit()
+    for file in files:
+        file_path = os.path.join("/tmp/halkill_data", file.filename)
 
-    # Upload raw file to Supabase Storage for frontend PDF viewer
-    storage_path = f"{current_user.username}/{file.filename}"
-    try:
-        with open(file_path, "rb") as f:
-            supabase.storage.from_("halkill_documents").upload(
-                path=storage_path,
-                file=f,
-                file_options={"content-type": file.content_type or "application/octet-stream", "upsert": "true"}
-            )
-        logger.info(f"Uploaded '{file.filename}' to Supabase Storage at '{storage_path}'")
-    except Exception as e:
-        logger.warning(f"Could not upload file to Supabase Storage: {str(e)}")
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
 
-    # Offload the heavy embedding generation to a Celery background task
-    process_and_cleanup_document_task.delay(file_path, current_user.username, file.filename)
+        new_doc = models.Document(filename=file.filename, owner_id=current_user.id)
+        db.add(new_doc)
+        db.commit()
 
-    return {"success": True, "filename": file.filename}
+        # Upload raw file to Supabase Storage for frontend PDF viewer
+        storage_path = f"{current_user.username}/{file.filename}"
+        try:
+            with open(file_path, "rb") as f:
+                supabase.storage.from_("halkill_documents").upload(
+                    path=storage_path,
+                    file=f,
+                    file_options={"content-type": file.content_type or "application/octet-stream", "upsert": "true"}
+                )
+            logger.info(f"Uploaded '{file.filename}' to Supabase Storage at '{storage_path}'")
+        except Exception as e:
+            logger.warning(f"Could not upload file to Supabase Storage: {str(e)}")
+
+        # Offload the heavy embedding generation to a Celery background task
+        process_and_cleanup_document_task.delay(file_path, current_user.username, file.filename)
+        uploaded_filenames.append(file.filename)
+
+    return {"success": True, "filenames": uploaded_filenames}
 
 def process_and_cleanup_document(file_path: str, username: str, filename: str):
     """Executes the computationally heavy embedding extraction, then automatically cleans up."""
