@@ -8,7 +8,7 @@ import uuid
 
 from database import engine, get_db
 import models, schemas, security
-from rag import ask_question_stream
+from rag import ask_question_stream, add_document_to_vector_store
 from dependencies import get_supabase
 from worker import process_and_cleanup_document_task
 
