@@ -6,7 +6,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL")
+db_url = os.getenv("DATABASE_URL")
+if db_url:
+    if db_url.startswith("postgres://"):
+        db_url = db_url.replace("postgres://", "postgresql://", 1)
+    if "pg8000" in db_url:
+        db_url = db_url.replace("+pg8000", "")
+
+SQLALCHEMY_DATABASE_URL = db_url
 
 # Updated for Supabase Connection Pooling
 engine = create_engine(
