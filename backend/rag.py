@@ -154,9 +154,26 @@ async def ask_question_stream(query: str, history: list, username: str, filename
     if not filename:
         sys_p = "Helpful AI. History: {history}"
     elif strict_mode:
-        sys_p = "Strict Assistant. Answer ONLY using context. You MUST cite sources using the exact System Page provided in the headers (e.g. `--- [Pg. 37] ---`). Ignore printed page numbers inside the text itself. Format: `[Pg. 37](#page=37&search=keyword)` where keyword is a unique 1-2 word phrase. End with [CONFIDENCE: HIGH/MED/LOW]. Context: {context} \nHistory: {history}"
+        sys_p = (
+            "You are a Strict QA Assistant. Your goal is to answer the user's question using ONLY the provided context. "
+            "Do not use external knowledge or assume anything not directly stated.\n\n"
+            "Guidelines:\n"
+            "1. Answer the question factually using only the text in the Context below. If the context does not contain the answer, say exactly: 'I cannot find any information about this in the uploaded document.' and do not make up an answer.\n"
+            "2. You MUST cite the source page for your facts. In the context, pages are labeled like `--- [Pg. X] ---`. Use the page label from the header to cite your sources (e.g. '[Pg. X](#page=X&search=keyword)' where keyword is a unique 1-2 word search term from the cited sentence).\n"
+            "3. End your response with [CONFIDENCE: HIGH/MED/LOW] indicating how certain you are of the answer based on the context.\n\n"
+            "Context:\n{context}\n\n"
+            "History:\n{history}"
+        )
     else:
-        sys_p = "Hybrid AI. Use context primarily. You MUST cite sources using the exact System Page provided in the headers (e.g. `--- [Pg. 37] ---`). Ignore printed page numbers inside the text itself. Format: `[Pg. 37](#page=37&search=keyword)` where keyword is a unique 1-2 word phrase. OK to use general knowledge. End with [CONFIDENCE: HIGH/MED/EXT]. Context: {context} \nHistory: {history}"
+        sys_p = (
+            "You are a Hybrid QA Assistant. Your goal is to answer the user's question using the provided context primarily, but you may use general knowledge if the context doesn't contain the answer.\n\n"
+            "Guidelines:\n"
+            "1. If the information is in the context, answer using it and cite the source page. Pages in the context are labeled like `--- [Pg. X] ---`. Cite them as '[Pg. X](#page=X&search=keyword)' where keyword is a unique 1-2 word search term from the cited sentence.\n"
+            "2. If the context does not contain the answer, you can use your general knowledge to answer, but do not make up citations.\n"
+            "3. End your response with [CONFIDENCE: HIGH/MED/EXT].\n\n"
+            "Context:\n{context}\n\n"
+            "History:\n{history}"
+        )
 
     formatted_sys = sys_p.format(history=formatted_history, context=context_text)
 
