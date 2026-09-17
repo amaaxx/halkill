@@ -7,9 +7,10 @@ from dotenv import load_dotenv
 from langchain_community.document_loaders import PyMuPDFLoader, TextLoader
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage
 from supabase.client import create_client
+from google import genai
 
 
 from logger import get_logger
@@ -41,37 +42,47 @@ GLOBAL_EMBEDDING = None
 TARGET_DIMS = 768
 
 class CloudEmbeddings:
-    """Zero-RAM cloud embeddings via Gemini API with built-in rate-limit protection."""
+    """Zero-RAM cloud embeddings via Gemini API with built-in batching to avoid rate limits."""
     def __init__(self):
-        self.model = GoogleGenerativeAIEmbeddings(
-            model="models/gemini-embedding-001",
-            google_api_key=GOOGLE_API_KEY,
-        )
+        self.client = genai.Client(api_key=GOOGLE_API_KEY)
+        self.model_name = "gemini-embedding-001"
     
     def _truncate(self, vec: list[float]) -> list[float]:
         """Slice 3072-dim Gemini vectors down to 768 to fit Supabase schema."""
         return vec[:TARGET_DIMS]
 
-    def _retry_embed(self, fn, *args, max_retries=6):
-        """Retry with exponential backoff on 429 rate-limit errors."""
+    def _retry_embed(self, fn, *args, max_retries=6, **kwargs):
+        """Retry with smart backoff parsing exact quota reset times on 429 rate-limit errors."""
+        import re
         for attempt in range(max_retries):
             try:
-                return fn(*args)
+                return fn(*args, **kwargs)
             except Exception as e:
-                if "429" in str(e) and attempt < max_retries - 1:
-                    wait = (2 ** attempt) * 2  # 2, 4, 8, 16, 32, 64s
-                    logger.warning(f"Embedding rate limited. Retry {attempt+1}/{max_retries} in {wait}s...")
+                err_str = str(e)
+                if "429" in err_str and attempt < max_retries - 1:
+                    match = re.search(r"retry in (\d+(?:\.\d+)?)s", err_str, re.IGNORECASE)
+                    wait = float(match.group(1)) + 1.0 if match else (2 ** attempt) * 5
+                    logger.warning(f"Embedding rate limited. Retry {attempt+1}/{max_retries} in {wait:.1f}s...")
                     time.sleep(wait)
                 else:
                     raise
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        raw = self._retry_embed(self.model.embed_documents, texts)
-        return [self._truncate(v) for v in raw]
+        # The new SDK takes a list and batches them automatically in 1 API request!
+        response = self._retry_embed(
+            self.client.models.embed_content,
+            model=self.model_name,
+            contents=texts,
+        )
+        return [self._truncate(v.values) for v in response.embeddings]
 
     def embed_query(self, text: str) -> list[float]:
-        raw = self._retry_embed(self.model.embed_query, text)
-        return self._truncate(raw)
+        response = self._retry_embed(
+            self.client.models.embed_content,
+            model=self.model_name,
+            contents=text,
+        )
+        return self._truncate(response.embeddings[0].values)
 
 def get_embeddings():
     global GLOBAL_EMBEDDING
@@ -142,6 +153,7 @@ async def ask_question_stream(query: str, history: list, username: str, filename
                 context_entries.append(f"--- [Pg. {page}] ---\n{content}")
                 
             context_text = "\n\n".join(context_entries)
+            logger.info(f"Retrieved {len(retrieved_sources)} sources, context text length: {len(context_text)}")
             
             # 2. Send the sources as a special "metadata" chunk before the AI response
             import json
@@ -155,22 +167,25 @@ async def ask_question_stream(query: str, history: list, username: str, filename
         sys_p = "Helpful AI. History: {history}"
     elif strict_mode:
         sys_p = (
-            "You are a Strict QA Assistant. Your goal is to answer the user's question using ONLY the provided context. "
-            "Do not use external knowledge or assume anything not directly stated.\n\n"
+            "You are a Strict QA Assistant. Your task is to answer the user's question relying strictly on the provided Context.\n\n"
             "Guidelines:\n"
-            "1. Answer the question factually using only the text in the Context below. If the context does not contain the answer, say exactly: 'I cannot find any information about this in the uploaded document.' and do not make up an answer.\n"
-            "2. You MUST cite the source page for your facts. In the context, pages are labeled like `--- [Pg. X] ---`. Use the page label from the header to cite your sources (e.g. '[Pg. X](#page=X&search=keyword)' where keyword is a unique 1-2 word search term from the cited sentence).\n"
-            "3. End your response with [CONFIDENCE: HIGH/MED/LOW] indicating how certain you are of the answer based on the context.\n\n"
+            "- First, read the Context carefully to see if it contains information relevant to the question.\n"
+            "- If the information is present, answer the question comprehensively with high detail based exclusively on the context.\n"
+            "- You MUST cite the source page for your facts. In the context, pages are labeled like `--- [Pg. X] ---`. Use the page label from the header to cite your sources (e.g. '[Pg. X](#page=X&search=keyword)' where keyword is a unique 1-2 word search term from the cited sentence).\n"
+            "- If the Context does not contain sufficient information to answer the question, you must respond with exactly: 'I cannot find any information about this in the uploaded document.'\n"
+            "- WARNING: DO NOT use factual information from the 'History' to answer the question. The History is only for conversational flow. ALL facts and citations MUST come exclusively from the 'Context' provided.\n"
+            "- End your response with [CONFIDENCE: HIGH/MED/LOW] indicating how certain you are of the answer based on the context.\n\n"
             "Context:\n{context}\n\n"
             "History:\n{history}"
         )
     else:
         sys_p = (
-            "You are a Hybrid QA Assistant. Your goal is to answer the user's question using the provided context primarily, but you may use general knowledge if the context doesn't contain the answer.\n\n"
+            "You are a Hybrid AI Assistant capable of general knowledge AND document Q&A.\n\n"
             "Guidelines:\n"
-            "1. If the information is in the context, answer using it and cite the source page. Pages in the context are labeled like `--- [Pg. X] ---`. Cite them as '[Pg. X](#page=X&search=keyword)' where keyword is a unique 1-2 word search term from the cited sentence.\n"
-            "2. If the context does not contain the answer, you can use your general knowledge to answer, but do not make up citations.\n"
-            "3. End your response with [CONFIDENCE: HIGH/MED/EXT].\n\n"
+            "1. If the provided Context contains information relevant to the user's question, answer using the Context and cite the source pages using `[Pg. X](#page=X&search=keyword)`.\n"
+            "2. If the Context is irrelevant, incomplete, or does not contain the answer, IGNORE the Context entirely and answer the question directly using your broad general knowledge.\n"
+            "3. NEVER state 'The document does not contain...', 'I cannot find...', or apologize for missing information. ALWAYS provide a direct, complete, and helpful answer to the user's prompt no matter what topic they ask about.\n"
+            "4. End your response with [CONFIDENCE: HIGH/MED/EXTERNAL].\n\n"
             "Context:\n{context}\n\n"
             "History:\n{history}"
         )
@@ -193,9 +208,9 @@ async def ask_question_stream(query: str, history: list, username: str, filename
                     yield chunk.content
             break
         except Exception as e:
-            if "429" in str(e) and attempt < max_retries - 1:
+            if ("429" in str(e) or "503" in str(e)) and attempt < max_retries - 1:
                 wait_time = (2 ** attempt) * 3  # 3, 6, 12, 24 seconds backoff
-                logger.warning(f"Rate limited. Retrying in {wait_time}s...")
+                logger.warning(f"Engine Rate Limited/Unavailable (429/503). Retrying in {wait_time}s...")
                 await asyncio.sleep(wait_time)
                 continue
             else:
@@ -257,8 +272,8 @@ def add_document_to_vector_store(file_path: str, username: str, filename: str):
         chunk.metadata["username"] = username
         chunk.metadata["source"] = filename
 
-    # BATCH INSERTION TO CLOUD DB (raw insert to bypass supabase-py/LangChain incompatibility)
-    # Small batches + delay to stay well under Gemini's 1500 RPM embedding quota
+    # BATCH INSERTION TO CLOUD DB
+    # Batch size 20 + 12s sleep guarantees strictly staying under 100 RPM quota (20 items * 5 = 100 RPM)
     batch_size = 20
 
     for i in range(0, len(chunks), batch_size):
@@ -276,4 +291,5 @@ def add_document_to_vector_store(file_path: str, username: str, filename: str):
             for j in range(len(batch))
         ]
         supabase.table("langchain_vecs").insert(rows).execute()
-        time.sleep(1)
+        if i + batch_size < len(chunks):
+            time.sleep(12)

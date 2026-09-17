@@ -10,7 +10,6 @@ from database import engine, get_db
 import models, schemas, security
 from rag import ask_question_stream, add_document_to_vector_store
 from dependencies import get_supabase
-from worker import process_and_cleanup_document_task
 
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -201,7 +200,7 @@ def delete_document(filename: str, current_user: models.User = Depends(get_curre
         
     return {"success": True}
 
-def upload_to_storage_and_trigger_celery(file_path: str, username: str, filename: str, content_type: str):
+def process_document_background(file_path: str, username: str, filename: str, content_type: str):
     from dependencies import get_supabase
     from logger import get_logger
     import os
@@ -220,10 +219,12 @@ def upload_to_storage_and_trigger_celery(file_path: str, username: str, filename
             )
         logger.info(f"Background task successfully uploaded '{filename}' to Supabase Storage.")
         
-        # Trigger Celery task once raw file is safely in Supabase storage
-        process_and_cleanup_document_task.delay(username, filename)
+        logger.info(f"Starting vector embedding process for {filename}...")
+        add_document_to_vector_store(file_path, username, filename)
+        logger.info(f"Completed vector embedding for {filename}.")
+        
     except Exception as e:
-        logger.error(f"Background upload task failed for '{filename}': {str(e)}")
+        logger.error(f"Background document processing failed for '{filename}': {str(e)}")
     finally:
         # Clean up ephemeral web process local disk space
         if os.path.exists(file_path):
@@ -277,7 +278,7 @@ async def upload_documents(
 
         # Offload BOTH storage upload and database embedding generation to background task
         background_tasks.add_task(
-            upload_to_storage_and_trigger_celery,
+            process_document_background,
             file_path,
             current_user.username,
             f.filename,
